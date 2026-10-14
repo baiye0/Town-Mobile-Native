@@ -1,0 +1,18 @@
+.DS_Store
+.build/
+artifacts/
+.gradle/
+build/
+local.properties
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Credentials and local runtime state
+.env
+.env.*
+*.p12
+*.mobileprovision
+*.jks
+*.keystore
+*.log
