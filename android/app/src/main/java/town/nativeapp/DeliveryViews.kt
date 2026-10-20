@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -104,13 +105,19 @@ import kotlinx.coroutines.launch
     val context=LocalContext.current;val preferences=remember{context.getSharedPreferences("settings",0)}
     var enabled by remember{mutableStateOf(preferences.getBoolean("notify.completed",false))}
     val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){allowed->enabled=allowed;preferences.edit().putBoolean("notify.completed",allowed).apply()}
-    Row{Text("对话完成通知",Modifier.weight(1f));Switch(enabled,{value->if(value&&Build.VERSION.SDK_INT>=33)permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else{enabled=value;preferences.edit().putBoolean("notify.completed",value).apply()}})}
+    SettingsToggle("对话完成通知",enabled){value->if(value&&Build.VERSION.SDK_INT>=33)permission.launch(android.Manifest.permission.POST_NOTIFICATIONS) else{enabled=value;preferences.edit().putBoolean("notify.completed",value).apply()}}
     Text("应用仍在运行时提示完成；系统暂停或关闭应用后，返回应用会核对回复。",style=MaterialTheme.typography.bodySmall)
 }
 
 @Composable fun ReadingSizeSetting(){
     val context=LocalContext.current;val prefs=remember{context.getSharedPreferences("settings",0)};var size by remember{mutableFloatStateOf(prefs.getFloat("reading.size",16f))}
-    Column{Text("阅读字号 · ${size.toInt()}");Slider(size,{size=it;prefs.edit().putFloat("reading.size",it).apply()},valueRange=12f..24f,steps=11)}
+    Column(verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) { Text("正文字号",Modifier.weight(1f));Text("${size.toInt()} sp",style=MaterialTheme.typography.labelLarge) }
+        Slider(size,{size=it;prefs.edit().putFloat("reading.size",it).apply()},valueRange=12f..24f,steps=11)
+        Surface(shape=RoundedCornerShape(12.dp),color=MaterialTheme.colorScheme.background) {
+            Text("从一个想法开始，继续你的对话。",Modifier.fillMaxWidth().padding(16.dp),fontSize=size.sp)
+        }
+    }
 }
 @Composable fun readingSize():Float{
     val context=LocalContext.current;val prefs=remember{context.getSharedPreferences("settings",0)};var size by remember{mutableFloatStateOf(prefs.getFloat("reading.size",16f))}

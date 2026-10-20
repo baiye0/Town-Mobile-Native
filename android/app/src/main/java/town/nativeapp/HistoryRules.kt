@@ -33,18 +33,83 @@ object HistoryRules {
     }
 
     fun encodeLocal(m:Message)=JSONObject().put("role",m.role).put("text",m.text).put("scene_id",m.sceneID).put("seq",m.sequence).put("kind",m.kind).put("timestamp",m.timestamp).put("scene_label",m.sceneLabel).put("files",m.files?.let{JSONArray(it.map{f->f.json()})}).put("process",m.process)
+        .put("id",m.id).put("localBaseline",m.localBaseline).put("replyTo",m.replyTo).put("localAfter",m.localAfter).put("streaming",m.streaming).put("persistedText",m.persistedText)
     fun decodeLocal(m:JSONObject)=Message(m.getString("role"),m.getString("text"),m.optString("scene_id").takeIf{it.isNotEmpty()&&it!="null"},if(m.has("seq")&&!m.isNull("seq"))m.getInt("seq") else null,m.optString("kind").takeIf{it.isNotEmpty()&&it!="null"},m.optString("timestamp").takeIf{it.isNotEmpty()&&it!="null"},m.optString("scene_label").takeIf{it.isNotEmpty()&&it!="null"},m.optJSONArray("files")?.let{a->(0 until a.length()).map{PendingAttachment.read(a.getJSONObject(it))}},m.nullString("process"))
+        .copy(id=m.nullString("id") ?: m.nullString("kind")?.takeIf{it.startsWith("local:")} ?: if(m.has("seq")&&!m.isNull("seq"))"server:${m.getInt("seq")}" else java.util.UUID.randomUUID().toString(),
+            localBaseline=if(m.has("localBaseline")&&!m.isNull("localBaseline"))m.getInt("localBaseline") else null,replyTo=m.nullString("replyTo"),localAfter=m.nullString("localAfter"),
+            streaming=if(m.has("streaming")&&!m.isNull("streaming"))m.getBoolean("streaming") else null,persistedText=m.nullString("persistedText"))
 
     fun role(raw:String)=if(raw=="user")"user" else "being"
     fun text(value:Any?):String=when(value){is String->value;is JSONArray->(0 until value.length()).mapNotNull{val item=value.optJSONObject(it);(item?.opt("text") ?: item?.opt("content")) as? String}.joinToString("\n\n");else->""}
     fun marker(text:String)=when{ text.startsWith("[breath yielded",true)->"放下手头的事，转向你";text.startsWith("[breath interrupted",true)->"已停止";text.startsWith("[breath superseded",true)->"被新的对话取代";else->text.trim('[',']') }
-    fun decode(r:JSONObject):Message{val content=text(r.opt("content"));val marker=r.optString("from")=="system"||r.optString("type")=="marker";return Message(role(r.optString("role")),if(marker)marker(content) else SceneRules.stripTransition(content),r.optString("scene_id").takeIf{it.isNotEmpty()&&it!="null"},if(r.has("seq"))r.optInt("seq") else null,if(marker)"marker" else null,r.optString("at").takeIf{it.isNotEmpty()},r.optString("scene_label",r.optJSONObject("scene_meta")?.optString("scene_label") ?: "").takeIf{it.isNotEmpty()})}
-    fun merge(local:List<Message>,confirmed:List<Message>):List<Message>{
-        val indexed=linkedMapOf<Int,Message>();local.forEach{m->m.sequence?.let{indexed[it]=m}};confirmed.forEach{m->m.sequence?.let{seq->indexed[seq]=m.copy(files=m.files ?: indexed[seq]?.files,process=m.process ?: indexed[seq]?.process)}}
-        val known=local.mapNotNull{it.sequence}.toSet();val echoes=confirmed.filter{it.sequence!=null&&it.sequence !in known}.toMutableList()
-        val attachmentMarker=Regex("(?m)^\\[attachment-message:v1:msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*\\]\\r?$")
-        fun attachmentLine(text:String)=text.lineSequence().lastOrNull{it.startsWith("[attachment-message:v1:")}
-        val pending=local.filter{m->if(m.sequence!=null || (role(m.role)=="being" && m.text.isBlank()))false else {val hasAttachment=attachmentMarker.containsMatchIn(m.text);val candidates=if(hasAttachment)confirmed else echoes;val index=candidates.indexOfLast{row->role(row.role)==role(m.role)&&row.sceneID==m.sceneID&&(if(hasAttachment)attachmentLine(row.text)==attachmentLine(m.text) else row.text==SceneRules.stripTransition(m.text))};if(index>=0){candidates[index].sequence?.let{seq->indexed[seq]=indexed[seq]!!.copy(files=m.files,process=m.process)};if(!hasAttachment)echoes.removeAt(index);false}else true}}
-        return indexed.values.sortedBy{it.sequence}+pending
+    fun decode(r:JSONObject):Message {
+        val content=text(r.opt("content"));val marker=r.optString("from")=="system"||r.optString("type")=="marker"
+        return Message(role(r.optString("role")),if(marker)marker(content) else SceneRules.stripTransition(content),r.optString("scene_id").takeIf{it.isNotEmpty()&&it!="null"},if(r.has("seq"))r.optInt("seq") else null,if(marker)"marker" else null,r.optString("at").takeIf{it.isNotEmpty()},r.optString("scene_label",r.optJSONObject("scene_meta")?.optString("scene_label") ?: "").takeIf{it.isNotEmpty()})
+            .let { if(it.sequence!=null)it.copy(id="server:${it.sequence}") else it }
+    }
+
+    fun merge(local:List<Message>,confirmed:List<Message>,activeIDs:Set<String> = emptySet()):List<Message> {
+        val indexed=linkedMapOf<Int,Message>()
+        local.forEach{m->m.sequence?.let{indexed[it]=m}}
+        fun bind(remote:Message,old:Message):Message = remote.copy(
+            id=old.id,kind=if(remote.kind=="marker")remote.kind else old.kind ?: remote.kind,
+            files=remote.files ?: old.files,process=remote.process ?: old.process,
+            replyTo=old.replyTo ?: remote.replyTo,localAfter=old.localAfter ?: remote.localAfter,localBaseline=old.localBaseline ?: remote.localBaseline,
+            text=if(old.streaming==true&&remote.streaming!=false)old.text else remote.text,
+            persistedText=if(old.streaming==true&&remote.streaming!=false)remote.text else remote.persistedText,
+            streaming=if(old.streaming==true&&remote.streaming!=false)true else remote.streaming
+        )
+        confirmed.forEach { row -> row.sequence?.let { seq -> indexed[seq]=indexed[seq]?.let{bind(row,it)} ?: row } }
+        val known=local.mapNotNull{it.sequence}.toSet()
+        val echoes=confirmed.filter{it.sequence!=null&&it.sequence !in known}.sortedBy{it.sequence}.toMutableList()
+        val pending=local.filter { row ->
+            if(row.sequence!=null||(role(row.role)=="being"&&row.text.isBlank()))false else {
+                val match=echoes.indexOfFirst { remote ->
+                    role(remote.role)==role(row.role)&&remote.sceneID==row.sceneID&&
+                        (row.localBaseline==null||remote.sequence!!>row.localBaseline)&&DeliveryRules.matchesSubmittedText(remote.text,row.text)
+                }
+                if(match>=0) {
+                    val remote=echoes.removeAt(match)
+                    indexed[remote.sequence!!]=bind(remote,row)
+                    false
+                } else if(row.role=="being"&&row.timestamp==null&&row.localBaseline==null&&row.id !in activeIDs) {
+                    // Migrate only a unique, substantial final suffix from older clients.
+                    val matches=indexed.values.filter { remote -> remote.sceneID==row.sceneID&&remote.role=="being"&&remote.kind==null&&
+                        remote.text.length>=256&&row.text.length>remote.text.length&&remote.text.length*2>=row.text.length&&row.text.endsWith(remote.text) }
+                    if(matches.size==1) {
+                        val remote=matches.single()
+                        indexed[remote.sequence!!]=remote.copy(process=listOfNotNull(remote.process,row.process,row.text.dropLast(remote.text.length).trim()).filter{it.isNotEmpty()}.joinToString("\n\n"))
+                        false
+                    } else true
+                } else true
+            }
+        }
+        return ordered(indexed.values.toList()+pending)
+    }
+
+    fun ordered(messages:List<Message>):List<Message> {
+        val parents=messages.associateBy{it.id}
+        val repliesByPrompt=messages.filter{it.role=="being"&&it.replyTo!=null}.groupBy{it.replyTo}
+        val positions=mutableMapOf<String,Pair<Int,Int>>()
+        fun position(message:Message,visiting:Set<String> = emptySet()):Pair<Int,Int> {
+            positions[message.id]?.let{return it}
+            message.sequence?.let{return it to 0}
+            val baseline=message.localBaseline ?: Int.MAX_VALUE
+            val parent=parents[message.localAfter ?: message.replyTo]
+            if(message.id in visiting||parent==null||parent.sceneID!=message.sceneID)return baseline to 1
+            // A question queued during thinking must follow the entire preceding
+            // turn, including bubbles that did not exist when it was queued.
+            val predecessors=if(message.role=="user") {
+                val promptID=if(parent.role=="user")parent.id else parent.replyTo
+                listOf(parent)+repliesByPrompt[promptID].orEmpty().filter{it.sceneID==message.sceneID}
+            } else listOf(parent)
+            val preceding=predecessors.map{position(it,visiting+message.id)}
+                .maxWith(compareBy<Pair<Int,Int>>{it.first}.thenBy{it.second})
+            return (maxOf(baseline,preceding.first) to if(preceding.first>=baseline)preceding.second+1 else 1).also{positions[message.id]=it}
+        }
+        messages.forEach{positions[it.id]=position(it)}
+        return messages.withIndex().sortedWith(compareBy<IndexedValue<Message>>{positions.getValue(it.value.id).first}
+            .thenBy{positions.getValue(it.value.id).second}.thenBy{if(it.value.sequence!=null)0 else 1}
+            .thenBy{it.value.timestamp.orEmpty()}.thenBy{it.index}).map{it.value}
     }
 }

@@ -23,7 +23,9 @@ class HistoryPresentationTest {
     @Test fun localCachePreservesPresentationMetadata() {
         val message=Message("being","已停止","scene",7,"marker","2026-10-14T10:30:00Z","主对话")
         assertEquals(message,HistoryRules.decodeLocal(HistoryRules.encodeLocal(message)))
-        assertEquals(Message("being","partial"),HistoryRules.decodeLocal(JSONObject("""{"role":"being","text":"partial"}""")))
+        val legacy=HistoryRules.decodeLocal(JSONObject("""{"role":"being","text":"partial"}"""))
+        assertEquals("being",legacy.role);assertEquals("partial",legacy.text);assertTrue(legacy.id.isNotBlank())
+        assertEquals(legacy.id,HistoryRules.decodeLocal(HistoryRules.encodeLocal(legacy)).id)
     }
 
     @Test fun dropsEmptyReplyPlaceholdersWithoutDroppingPartialText() {
@@ -34,7 +36,7 @@ class HistoryPresentationTest {
 
     @Test fun preservesPartialHistoryAndLocalEchoes(){
         val old=Message("being","older","a",1);val pending=Message("user","again","a");val incoming=Message("user","again","a",2)
-        val result=HistoryRules.merge(listOf(old,pending,pending),listOf(incoming))
+        val result=HistoryRules.merge(listOf(old,pending,pending.copy(id="second-prompt")),listOf(incoming))
         assertEquals(listOf("older","again","again"),result.map{it.text});assertNull(result.last().sequence)
         assertEquals(2,HistoryRules.merge(listOf(pending.copy(sceneID="b")),listOf(incoming)).size)
     }

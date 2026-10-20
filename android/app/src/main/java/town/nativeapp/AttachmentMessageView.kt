@@ -26,7 +26,7 @@ import java.io.File
 
 @Composable fun AttachmentMessageView(message:Message,m:TownModel,color:Color){
     val refs=remember(message.text){Regex("(?m)^\\[attachment-message:v1:(msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*)\\]\\r?$").findAll(message.text).lastOrNull()?.groupValues?.get(1)?.split(',') ?: emptyList()}
-    var files by remember(message){mutableStateOf(message.files ?: emptyList())};var text by remember(message){mutableStateOf<String?>(null)};var remoteImages by remember(message){mutableStateOf<Map<String,androidx.compose.ui.graphics.ImageBitmap>>(emptyMap())}
+    var files by remember(message.id,message.files){mutableStateOf(message.files ?: emptyList())};var text by remember(message.id){mutableStateOf<String?>(null)};var remoteImages by remember(message.id){mutableStateOf<Map<String,androidx.compose.ui.graphics.ImageBitmap>>(emptyMap())}
     var error by remember{mutableStateOf<String?>(null)};var busy by remember{mutableStateOf(false)};var parsed by remember{mutableStateOf<String?>(null)};var revision by remember{mutableIntStateOf(0)};var previewFile by remember{mutableStateOf<File?>(null)}
     val context=LocalContext.current;val scope=rememberCoroutineScope()
     LaunchedEffect(m.connection?.endpoint,refs,revision){
@@ -92,7 +92,7 @@ import java.io.File
             }
         }
         var expanded by remember{mutableStateOf(false)}
-        if(!message.process.isNullOrBlank()){TextButton(onClick={expanded=!expanded}){Text("思考与工具过程",color=color)};if(expanded)Text(message.process,style=MaterialTheme.typography.bodySmall,color=color)}
+        if(message.role!="user"&&!message.process.isNullOrBlank()){TextButton(onClick={expanded=!expanded}){Text("思考与工具过程",color=color)};if(expanded)Text(message.process,style=MaterialTheme.typography.bodySmall,color=color)}
         if(busy)CircularProgressIndicator(Modifier.size(20.dp))
         error?.let{Text(it,style=MaterialTheme.typography.bodySmall,color=color);TextButton(onClick={revision++}){Text("重新读取附件",color=color)}}
     }

@@ -36,6 +36,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
@@ -45,7 +46,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import androidx.compose.foundation.interaction.collectIsDraggedAsState
 
 class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); setIntent(intent); CompletionNotifications.capture(intent) }
@@ -67,6 +67,8 @@ class MainActivity : ComponentActivity() {
     var rename by remember { mutableStateOf<Room?>(null) }
     var renameText by remember { mutableStateOf("") }
     val screen = nav.screen
+    var inputFocused by remember { mutableStateOf(false) }
+    var showQuestionIndex by rememberSaveable(m.connection?.endpoint,m.selected,m.showAllScenes) { mutableStateOf(false) }
     LaunchedEffect(m.connection,m.appActive,screen) {
         if(m.connection!=null && m.appActive && screen=="chat")while(true){m.syncSBS();kotlinx.coroutines.delay(10000)}
     }
@@ -99,17 +101,20 @@ class MainActivity : ComponentActivity() {
                 Row { TextButton(onClick={nav.sceneSheet="bind"},enabled=m.connection!=null){Text("绑定已有场景")};TextButton(onClick={nav.sceneSheet="details"},enabled=m.current!=null){Text("场景详情")} }
                 Row(Modifier.fillMaxWidth().heightIn(min=44.dp),verticalAlignment=Alignment.CenterVertically) { Text("显示全部场景上下文",Modifier.weight(1f),fontSize=14.sp);Switch(m.showAllScenes,{m.showAllScenes=it},enabled=m.current!=null) }
             }
-            HorizontalDivider(); ListItem(headlineContent={Text(m.connection?.being ?: "未连接")},leadingContent={Icon(Icons.Outlined.AccountCircle,null)},trailingContent={TextButton(onClick={nav.screen="more";scope.launch{drawer.close()}}){Text("设置")}})
+            HorizontalDivider(); ListItem(headlineContent={Text(m.connection?.being ?: "未连接",maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},leadingContent={Icon(Icons.Outlined.AccountCircle,null)},trailingContent={ActionIcon(AppIcons.Settings,"设置"){nav.screen="more";scope.launch{drawer.close()}}})
         }
     }) {
         Scaffold(topBar={Column { CenterAlignedTopAppBar(
-            title={if(screen=="chat") Column(Modifier.clickable{nav.screen="conversation-settings"},horizontalAlignment=Alignment.CenterHorizontally){Text(m.current?.title ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);if(m.connection!=null)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)){SBSStatusDot(m.sbsEnabled==true,m.sbsActivity.isNotEmpty());Text(m.sbsStatus,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}} else Text(destinations.find{it.id==screen}?.title ?: mapOf("more" to "更多","connection" to "连接 Being","pair" to "连接 Being Town","models" to "模型设置","navigation" to "自定义导航")[screen] ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp)},
+            title={if(screen=="chat") Column(Modifier.clickable{nav.screen="conversation-settings"},horizontalAlignment=Alignment.CenterHorizontally){Text(m.current?.title ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);if(m.connection!=null)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)){SBSStatusDot(m.sbsEnabled==true,m.sbsActivity.isNotEmpty());Text(m.sbsStatus,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}} else Text(destinations.find{it.id==screen}?.title ?: mapOf("more" to "设置与小镇","connection" to "连接 Being","pair" to "小镇连接","models" to "模型设置","navigation" to "底部导航","conversation-settings" to "对话设置","notification-settings" to "通知设置","appearance" to "外观","updates" to "应用更新","queue" to "发送队列")[screen] ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},
             navigationIcon={IconButton(onClick={if(screen in nav.tabs+"more")scope.launch{drawer.open()} else nav.back()}){Icon(if(screen in nav.tabs+"more")Icons.Outlined.Menu else Icons.AutoMirrored.Outlined.ArrowBack,"侧栏或返回")}},
-            actions={if(screen=="chat") IconButton(onClick={m.history()},enabled=!m.historyLoading&&m.connection!=null){Icon(Icons.Outlined.Refresh,"刷新")}},
+            actions={if(screen=="chat") {
+                ActionIcon(AppIcons.List,"提问索引",m.displayMessages.any{it.role=="user"}) { showQuestionIndex=true }
+                ActionIcon(Icons.Outlined.Refresh,"刷新",!m.historyLoading&&m.connection!=null) { m.history() }
+            }},
             colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background))
             }},
             bottomBar={Column{
-                if(screen=="chat"){Composer(m){nav.screen="connection"}}
+                if(screen=="chat"){Composer(m,onFocus={inputFocused=it}){nav.screen="connection"}}
                 if(!keyboard && screen in nav.tabs+"more")NavigationBar {
                     (nav.tabs+"more").forEach { id -> NavigationBarItem(selected=screen==id,onClick={nav.screen=id},icon={BadgedBox(badge={val n=social.unread[id] ?: 0;if(n>0)Badge{Text(if(n>99)"99+" else "$n")}}){Icon(destinationIcon(id),destinations.find{it.id==id}?.title ?: "更多")}}) }
                 }
@@ -117,7 +122,7 @@ class MainActivity : ComponentActivity() {
         ) { padding -> Box(Modifier.fillMaxSize().padding(padding)) {
             EdgeNavigation(nav.canBack && screen != "chat",nav.canForward,{nav.back()},{nav.forward()}) {
             when(screen) {
-                "chat" -> Chat(m){nav.screen="connection"}
+                "chat" -> Chat(m,showQuestionIndex,{showQuestionIndex=false},inputFocused){nav.screen="connection"}
                 "firesides","bonfire","mail" -> key(screen,social.identity?.id) { SocialScreen(screen,m,social,nav) }
                 "pair" -> PairingScreen(m,social)
                 "queue" -> DeliveryQueueScreen(m)
@@ -125,6 +130,8 @@ class MainActivity : ComponentActivity() {
                 "navigation" -> NavigationSettings(nav)
                 "conversation-settings" -> ConversationSettingsScreen(m)
                 "notification-settings" -> NotificationSettingsScreen()
+                "appearance" -> AppearanceSettings(nav)
+                "updates" -> AppUpdateScreen()
                 "connection" -> Settings(m){nav.screen="more"}
                 "more" -> MoreScreen(m,social,nav)
                 else -> key(screen,social.identity?.id) { CatalogScreen(screen,m,social,nav) }
@@ -135,27 +142,13 @@ class MainActivity : ComponentActivity() {
     deleting?.let{room->AlertDialog(onDismissRequest={deleting=null},title={Text("删除场景？")},text={Text("确定从本机场景列表中删除「${room.title}」？历史记录会保留，仍可开启「显示全部场景上下文」查看。")},confirmButton={TextButton(onClick={m.delete(room.id);deleting=null}){Text("确认删除")}},dismissButton={TextButton(onClick={deleting=null}){Text("取消")}})}
     if(rename!=null)AlertDialog(onDismissRequest={rename=null},title={Text("重命名场景")},text={OutlinedTextField(renameText,{renameText=it})},confirmButton={TextButton(onClick={m.rename(rename!!.id,renameText);rename=null}){Text("保存")}},dismissButton={TextButton(onClick={rename=null}){Text("取消")}})
 }
-@Composable fun Chat(m: TownModel, connect:()->Unit) {
+@Composable fun Chat(m: TownModel, showIndex:Boolean=false, closeIndex:()->Unit={}, inputFocused:Boolean=false, connect:()->Unit) {
     LaunchedEffect(m.connection?.endpoint){m.history()}
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     val messages = m.displayMessages
-    var showIndex by remember{mutableStateOf(false)};var indexSearch by remember{mutableStateOf("")}
-    val state = rememberLazyListState()
-    val scope = rememberCoroutineScope()
-    var followLatest by remember(m.selected,m.showAllScenes) { mutableStateOf(true) }
-    val dragging by state.interactionSource.collectIsDraggedAsState()
-    LaunchedEffect(dragging) { if(dragging) followLatest=false }
-    LaunchedEffect(state) { snapshotFlow { !state.canScrollForward }.collect { if(it) followLatest=true } }
-    // A streamed reply changes its text for every network chunk.  Scrolling on
-    // every chunk forces LazyColumn to measure the whole visible window again,
-    // which makes both streaming and dragging feel sticky.  Coalesce those
-    // updates and scroll only after the stream has been quiet briefly.
-    LaunchedEffect(messages.lastOrNull()?.text,messages.size,m.selected,m.showAllScenes) {
-        if(messages.isNotEmpty() && followLatest) {
-            delay(80)
-            if (followLatest) state.scrollToItem(messages.lastIndex)
-        }
-    }
+    val scroll = key(m.connection?.endpoint,m.selected,m.showAllScenes){rememberChatScrollController()}
+    val state = scroll.list
+    ChatScrollEffects(scroll,messages,m.streamingReplyID,inputFocused,m.submittedMessageID){focus.clearFocus()}
     if (messages.isEmpty()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp).padding(top = 42.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
             Box(Modifier.size(100.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), CircleShape), contentAlignment = Alignment.Center) { Image(painterResource(R.drawable.client_logo), "Being", Modifier.size(100.dp).clip(RoundedCornerShape(24.dp))) }
@@ -166,27 +159,26 @@ class MainActivity : ComponentActivity() {
     } else {
         Box(Modifier.fillMaxSize()) {
         LazyColumn(state = state,modifier=Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            itemsIndexed(messages, key = { index, message ->
-                message.sequence ?: message.kind ?: "${message.role}:${message.timestamp}:${index}"
-            }) { index,message ->
+            itemsIndexed(messages, key = { _, message -> message.id }) { index,message ->
                 message.timestamp?.let{time->if(index==0||messages[index-1].timestamp?.take(16)!=time.take(16))Text(chatTime(time),Modifier.fillMaxWidth().padding(vertical=4.dp),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,textAlign=androidx.compose.ui.text.style.TextAlign.Center)}
                 if(message.kind=="marker"){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){HorizontalDivider(Modifier.weight(1f));Text(message.text,Modifier.padding(horizontal=8.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant);HorizontalDivider(Modifier.weight(1f))}}
                 else {
                 val user = message.role == "user"
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
+                Row(Modifier.fillMaxWidth().padding(start=if(user)40.dp else 0.dp,end=if(user)0.dp else 24.dp), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
                     val hasAttachment = user && (message.files?.isNotEmpty() == true || message.text.contains("[attachment-message:v1:"))
-                    val originalText = DeliveryRules.displayText(message.text).trim()
+                    val originalText = MessagePresentation.body(message)
+                    MessageActions(originalText,onQuote={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+it}) {
+                    Column(Modifier.widthIn(max=if(user)310.dp else 580.dp),horizontalAlignment=if(user)Alignment.End else Alignment.Start) {
                     if (hasAttachment) {
                         Column(Modifier.wrapContentWidth().widthIn(max = 310.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.chatBubble(true), RoundedCornerShape(22.dp)).padding(16.dp)) {
+                            Column(Modifier.wrapContentWidth()) {
                                 val isGlobalBeingMessage = message.sceneID == null && message.role == "being" && message.kind == null
-                                if((m.showAllScenes&&message.sceneID!=m.selected)||isGlobalBeingMessage)Text(if(isGlobalBeingMessage) "全局消息" else (message.sceneLabel ?: message.sceneID ?: m.sceneName(message)),fontSize=12.sp,color=Color.White.copy(alpha=.82f),maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                                AttachmentMessageView(message,m,Color.White)
-                                DeliveryStatusView(message,m,Color.White)
+                                if((m.showAllScenes&&message.sceneID!=m.selected)||isGlobalBeingMessage)Text(if(isGlobalBeingMessage) "全局消息" else (message.sceneLabel ?: message.sceneID ?: m.sceneName(message)),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                AttachmentMessageView(message,m,MaterialTheme.colorScheme.onSurface)
+                                DeliveryStatusView(message,m,MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             if (originalText.isNotBlank()) {
                                 Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.chatBubble(true), RoundedCornerShape(22.dp)).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                                    TextButton(onClick={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+originalText.lines().joinToString("\n") { "> $it" }}){Text("引用到草稿",color=Color.White)}
                                     MarkdownText(originalText, textColor=Color.White)
                                 }
                             }
@@ -195,27 +187,33 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.wrapContentWidth().widthIn(max = if (user) 310.dp else 580.dp).background(MaterialTheme.colorScheme.chatBubble(user), RoundedCornerShape(22.dp)).padding(16.dp)) {
                             val isGlobalBeingMessage = message.sceneID == null && message.role == "being" && message.kind == null
                             if((m.showAllScenes&&message.sceneID!=m.selected)||isGlobalBeingMessage)Text(if(isGlobalBeingMessage) "全局消息" else (message.sceneLabel ?: message.sceneID ?: m.sceneName(message)),fontSize=12.sp,color=if(user)Color.White else MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            TextButton(onClick={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+DeliveryRules.displayText(message.text).lines().joinToString("\n") { "> $it" }}){Text("引用到草稿",color=if(user)Color.White else MaterialTheme.colorScheme.primary)}
-                            AttachmentMessageView(message,m,if(user)Color.White else MaterialTheme.colorScheme.onSurface)
+                            // AttachmentMessageView intentionally omits user text: render the prompt here,
+                            // just as the attachment branch does, before its secondary actions/status.
+                            if(user) UserMessageBody(message) else AttachmentMessageView(message,m,MaterialTheme.colorScheme.onSurface)
                             if(user) DeliveryStatusView(message,m,Color.White)
                         }
                     }
+                    }
+                    }
+                }
+                if(user) {
+                    val running=m.busy&&m.activeSendID?.let{message.id=="local:$it:user"}==true
+                    if(running||!message.process.isNullOrEmpty())ChatRunView(message.process.orEmpty(),m.activity,running)
                 }
                 }
             }
-            item {
-                if(m.busy && m.activeScene==m.selected && m.activity.isNotEmpty() && m.activity != "正在回复") ThinkingIndicator(m.activity)
+            item(key=CHAT_BOTTOM_KEY) {
+                if(m.historyLoading)CircularProgressIndicator(Modifier.size(20.dp),strokeWidth=2.dp)
                 Spacer(Modifier.height(1.dp))
             }
         }
-        TextButton(onClick={showIndex=true},modifier=Modifier.align(Alignment.TopEnd)){Text("提问索引")}
-        if(state.canScrollForward)SmallFloatingActionButton(onClick={followLatest=true;scope.launch{state.animateScrollToItem(messages.lastIndex)}},modifier=Modifier.align(Alignment.BottomEnd).padding(16.dp),containerColor=MaterialTheme.colorScheme.surface){Icon(Icons.Outlined.ArrowDownward,"回到底部")}
+        if(state.canScrollForward)SmallFloatingActionButton(onClick={scroll.bottom()},modifier=Modifier.align(Alignment.BottomEnd).padding(16.dp),containerColor=MaterialTheme.colorScheme.surface){Icon(Icons.Outlined.ArrowDownward,"回到底部")}
         }
     }
-    if(showIndex)AlertDialog(onDismissRequest={showIndex=false},title={Text("提问索引")},text={Column{OutlinedTextField(indexSearch,{indexSearch=it},label={Text("搜索提问")});LazyColumn(Modifier.heightIn(max=400.dp)){itemsIndexed(messages){index,message->if(message.role=="user"&&(indexSearch.isEmpty()||message.text.contains(indexSearch,true)))TextButton(onClick={followLatest=false;showIndex=false;scope.launch{state.scrollToItem(index)}}){Text(DeliveryRules.displayText(message.text),maxLines=3)}}}}},confirmButton={TextButton(onClick={showIndex=false}){Text("完成")}})
+    if(showIndex)QuestionIndexSheet(messages,onDismiss=closeIndex){index->scroll.message(messages[index].id);closeIndex()}
 }
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun Composer(m: TownModel, connect: () -> Unit) {
+@Composable private fun Composer(m: TownModel, onFocus:(Boolean)->Unit={}, connect: () -> Unit) {
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var voiceScene by rememberSaveable { mutableStateOf<String?>(null) }
     var voiceEndpoint by rememberSaveable { mutableStateOf<String?>(null) }
@@ -227,13 +225,20 @@ class MainActivity : ComponentActivity() {
     }
     Column(Modifier.imePadding().padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         m.notice?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 8.dp)) }
-        Surface(shape = RoundedCornerShape(28.dp), tonalElevation = 3.dp, shadowElevation = 2.dp) {
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp
+        ) {
             Column(Modifier.fillMaxWidth()) {
                 AttachmentPreviewStrip(m)
                 Row(Modifier.fillMaxWidth().heightIn(min=48.dp).padding(horizontal=4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick={actionsExpanded=!actionsExpanded},modifier=Modifier.size(44.dp)){Icon(if(actionsExpanded) Icons.Outlined.Close else Icons.Outlined.Add,"资源库")}
                     androidx.compose.foundation.text.BasicTextField(
-                        value=m.draft,onValueChange={m.draft=it},modifier=Modifier.weight(1f).padding(start=12.dp,end=4.dp),maxLines=6,
+                        value=m.draft,onValueChange={m.draft=it},modifier=Modifier.weight(1f).onFocusChanged{onFocus(it.isFocused)}.padding(start=12.dp,end=4.dp),maxLines=6,
                         textStyle=androidx.compose.ui.text.TextStyle(fontSize=16.sp,color=MaterialTheme.colorScheme.onSurface),
                         cursorBrush=androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
                         decorationBox={inner->Box(Modifier.padding(vertical=8.dp)){if(m.draft.isEmpty())Text("说点什么…",fontSize=16.sp,color=MaterialTheme.colorScheme.onSurfaceVariant);inner()}}
@@ -264,23 +269,29 @@ class MainActivity : ComponentActivity() {
         } }
     }
 }
-@Composable private fun Settings(m: TownModel, close: () -> Unit) {
+@Composable fun Settings(m: TownModel, close: () -> Unit) {
     var link by remember { mutableStateOf("") }
     val uri = LocalUriHandler.current
     LaunchedEffect(m.connection) { m.loadModel() }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        Icon(Icons.Outlined.AutoAwesome, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
-        Text("Being", fontSize = 24.sp, fontFamily = FontFamily.Serif)
-        OutlinedTextField(link, { link = it }, Modifier.fillMaxWidth(), label = { Text("Being 完整连接地址") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(18.dp))
-        Button(onClick = { m.connect(link) { link = ""; close() } }, enabled = link.isNotBlank() && !m.connecting, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text(if (m.connecting) "正在验证…" else "连接 Being") }
-        m.notice?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).imePadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        SettingsCard { Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+            SettingsHeading("连接你的 Being",Icons.Outlined.Link)
+            OutlinedTextField(link, { link = it }, Modifier.fillMaxWidth(), label = { Text("Being 完整连接地址") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(14.dp))
+            Button(onClick = { m.connect(link) { link = ""; close() } }, enabled = link.isNotBlank() && !m.connecting, modifier = Modifier.fillMaxWidth().heightIn(min=52.dp)) {
+                if(m.connecting)CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp) else Icon(Icons.Outlined.Link,null,Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp));Text(if (m.connecting) "正在验证…" else "连接 Being")
+            }
+            m.notice?.let { Text(it, color = MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
+        } }
         m.connection?.let { c ->
-            HorizontalDivider(); Text("当前连接", fontWeight = FontWeight.SemiBold); Text(c.being); Text(c.endpoint, fontSize = 12.sp); Text("模型 · ${m.model}", fontSize = 14.sp)
-            TextButton(onClick = { m.disconnect(); close() }) { Text("断开连接", color = MaterialTheme.colorScheme.error) }
+            SettingsCard { Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                SettingsHeading("当前连接",Icons.Outlined.CheckCircle,c.being)
+                Text(c.endpoint,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("模型 · ${m.model}",style=MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = { m.disconnect(); close() }) { Icon(Icons.Outlined.LinkOff,null,Modifier.size(18.dp),tint=MaterialTheme.colorScheme.error);Spacer(Modifier.width(8.dp));Text("断开连接", color = MaterialTheme.colorScheme.error) }
+            } }
         }
-        HorizontalDivider()
-        TextButton(onClick = { uri.openUri("https://beings.town") }) { Icon(Icons.Outlined.Eco, null); Spacer(Modifier.width(10.dp)); Text("探索 Being Town"); Spacer(Modifier.weight(1f)); Icon(Icons.AutoMirrored.Outlined.ArrowForward, null) }
-        Text("Being 0.2 · Jetpack Compose", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+        SettingsCard { SettingsRow("探索 Being Town",Icons.Outlined.Eco){uri.openUri("https://beings.town")} }
     }
 }
 
@@ -290,30 +301,9 @@ fun chatTime(value:String):String = runCatching {
     date.format(format)
 }.getOrDefault(value.replace("T"," ").take(16))
 
-@Composable private fun ThinkingIndicator(activity: String) {
-    var phase by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while(true) { kotlinx.coroutines.delay(330); phase=(phase+1)%3 } }
-    Column(verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        Text("Being",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(Modifier.padding(vertical=10.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically) {
-            repeat(3) { index -> Box(Modifier.size(6.dp).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha=if(phase==index)1f else 0.3f),CircleShape)) }
-            if(activity!="思考中") Text(activity,fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
 @Composable private fun DeliveryStatusView(message: Message, m: TownModel, color: Color) {
     val entry = m.outbox.firstOrNull { "local:${it.id}:user" == message.kind } ?: return
-    val label = when (entry.phase) {
-        "queued" -> if (entry.files.isEmpty()) "等待发送" else "等待上传附件"
-        "preparing" -> if (entry.files.any { it.attachmentID == null }) "正在上传附件" else "正在准备附件"
-        "sending" -> "正在发送"
-        "waiting" -> "服务端排队中"
-        "failed" -> "发送失败"
-        "unknown" -> "发送结果待确认"
-        "stopped" -> "已停止"
-        else -> entry.phase
-    }
+    val label = DeliveryRules.bubbleStatus(entry) ?: return
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(label, fontSize = 12.sp, color = color.copy(alpha = .82f))
         entry.error?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.sp, color = color.copy(alpha = .76f), maxLines = 3) }
@@ -326,20 +316,17 @@ fun chatTime(value:String):String = runCatching {
 
 
 @Composable fun SBSControl(m:TownModel) {
-    var expanded by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(horizontal=20.dp,vertical=4.dp)) {
-        TextButton(onClick={expanded=!expanded},modifier=Modifier.fillMaxWidth()) {
+    LaunchedEffect(m.connection) { if(m.connection!=null)m.syncSBS() }
+    Column(Modifier.fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+        Row(verticalAlignment=Alignment.CenterVertically) {
             SBSStatusDot(m.sbsEnabled==true,m.sbsActivity.isNotEmpty())
             Spacer(Modifier.width(8.dp))
             Text(m.sbsStatus,Modifier.weight(1f),color=MaterialTheme.colorScheme.onSurface,style=MaterialTheme.typography.bodySmall)
-            Text(if(expanded)"收起" else "设置",color=MaterialTheme.colorScheme.onSurface)
         }
-        if(expanded){
-            Row(verticalAlignment=Alignment.CenterVertically){Text("显示 SBS 消息正文",Modifier.weight(1f));Switch(m.showAllScenes||m.showSBS,{m.showSBS=it;m.saveSBS()},enabled=!m.showAllScenes&&m.current!=null)}
-            Text(if(m.showAllScenes)"全部场景包含 SBS 正文；切回当前场景后恢复该场景的设置。" else "仅影响当前场景，思考状态统一在顶部显示。",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(verticalAlignment=Alignment.CenterVertically){Text("自主醒来",Modifier.weight(1f));Switch(m.sbsEnabled==true,{m.setSBSEnabled(it)},enabled=m.sbsEnabled!=null&&!m.sbsUpdating)}
-            Text("控制 SBS 是否主动开始任务",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            SettingsToggle("显示 SBS 消息正文",m.showAllScenes||m.showSBS,enabled=!m.showAllScenes&&m.current!=null,
+                subtitle=if(m.showAllScenes)"全部场景包含 SBS 正文；切回当前场景后恢复该场景的设置。" else "仅影响当前场景，思考状态在顶部显示。") {m.showSBS=it;m.saveSBS()}
+            HorizontalDivider()
+            SettingsToggle("自主醒来",m.sbsEnabled==true,enabled=m.sbsEnabled!=null&&!m.sbsUpdating,subtitle="允许 SBS 主动开始任务") {m.setSBSEnabled(it)}
             m.sbsError?.let{Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)}
-        }
     }
 }

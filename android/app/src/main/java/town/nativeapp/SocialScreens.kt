@@ -13,10 +13,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
 import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
@@ -33,10 +39,12 @@ import org.json.JSONObject
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun SocialScreen(kind:String,m:TownModel,social:SocialModel,nav:NavigationModel){
     var room by rememberSaveable{mutableStateOf("")};var roomTitle by rememberSaveable{mutableStateOf("")};var mailbox by rememberSaveable{mutableStateOf("all")};var limit by rememberSaveable{mutableIntStateOf(100)}
-    var rows by remember{mutableStateOf<List<JSONObject>>(emptyList())};var rooms by remember{mutableStateOf<List<JSONObject>>(emptyList())};var search by rememberSaveable{mutableStateOf("")}
+    var rows by remember{mutableStateOf<List<JSONObject>>(emptyList())};var rooms by remember{mutableStateOf<List<JSONObject>>(emptyList())};var search by rememberSaveable(room){mutableStateOf("")}
     var loading by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)};var refresh by remember{mutableIntStateOf(0)};var composing by remember{mutableStateOf(false)};var reply by remember{mutableStateOf<JSONObject?>(null)};var showMembers by remember(room){mutableStateOf(false)}
-    var filters by remember{mutableStateOf(FeedFilter())};var showFilters by remember{mutableStateOf(false)}
-    val scope=rememberCoroutineScope()
+    var filters by remember(room){mutableStateOf(FeedFilter())};var showFilters by remember{mutableStateOf(false)}
+    var showMenu by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    LaunchedEffect(room,mailbox) { listState.scrollToItem(0) }
     var nextRoom by rememberSaveable { mutableStateOf("") }
     BackHandler(room.isNotEmpty()){nextRoom=room;room="";rows=emptyList()}
     LaunchedEffect(social.identity?.id,kind,room,mailbox,limit,social.revision,refresh){
@@ -54,40 +62,62 @@ import org.json.JSONObject
         }catch(e:CancellationException){throw e}catch(_:Exception){error="无法读取内容，请检查网络、小镇身份与权限。"}finally{loading=false}
     }
     if(social.identity==null){Column(Modifier.padding(28.dp),verticalArrangement=Arrangement.spacedBy(20.dp)){Icon(destinationIcon(kind),null,Modifier.size(48.dp));Text("连接 Town，继续阅读",fontSize=26.sp);Text(clientDescriptions[kind] ?: "");Button(onClick={nav.screen="pair"}){Text("配置 Town 连接")}};return}
+    val roomList = kind == "firesides" && room.isEmpty()
+    val filtered = search.isNotBlank() || (!roomList && filters != FeedFilter())
+    val visibleRooms = rooms.filter { search.isBlank() || it.field("name","title").contains(search.trim(),true) }
+    val visibleRows = rows.filter { filters.matches(it,social.identity?.id ?: "") && (search.isBlank() || it.toString().contains(search.trim(),true)) }
+        .let { if(filters.oldestFirst) it.reversed() else it }
     EdgeNavigation(room.isNotEmpty(),room.isEmpty()&&nextRoom.isNotEmpty(),{nextRoom=room;room="";rows=emptyList()},{room=nextRoom;nextRoom=""}) {
     Column(Modifier.fillMaxSize()){
-        Row(Modifier.fillMaxWidth().padding(horizontal=16.dp),horizontalArrangement=Arrangement.SpaceBetween){
-            TextButton(onClick={refresh++}){Text(if(loading)"刷新中…" else "刷新")}
-            if(room.isNotEmpty())TextButton(onClick={nextRoom=room;room="";rows=emptyList()}){Text("围炉列表")}
-            if(kind!="firesides"||room.isNotEmpty())TextButton(onClick={reply=null;composing=true}){Text(if(kind=="mail")"写私信" else "写消息")}
+        Row(Modifier.fillMaxWidth().padding(horizontal=8.dp),verticalAlignment=Alignment.CenterVertically){
+            if(room.isNotEmpty())ActionIcon(Icons.AutoMirrored.Outlined.ArrowBack,"返回围炉列表"){nextRoom=room;room="";rows=emptyList()}
+            Text(
+                if(room.isNotEmpty())roomTitle else if(roomList)"${visibleRooms.size} 个围炉" else "${visibleRows.size} 条消息",
+                Modifier.weight(1f).padding(start=8.dp),fontSize=14.sp,
+                color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis
+            )
+            BadgedBox(badge={if(filtered)Badge()}){
+                ActionIcon(Icons.Outlined.Search,if(filtered)"搜索与筛选（已启用）" else if(roomList)"搜索围炉" else "搜索与筛选"){showFilters=true}
+            }
+            if(room.isEmpty())ActionIcon(Icons.Outlined.Refresh,if(loading)"刷新中" else "刷新",!loading){refresh++}
+            if(!roomList)ActionIcon(Icons.Outlined.Edit,if(kind=="mail")"写私信" else "写消息"){reply=null;composing=true}
+            if(kind=="bonfire"||room.isNotEmpty())Box{
+                ActionIcon(Icons.Outlined.MoreVert,"更多操作"){showMenu=true}
+                DropdownMenu(expanded=showMenu,onDismissRequest={showMenu=false}){
+                    if(room.isNotEmpty())DropdownMenuItem(text={Text(if(loading)"刷新中…" else "刷新")},leadingIcon={Icon(Icons.Outlined.Refresh,null)},enabled=!loading,onClick={showMenu=false;refresh++})
+                    if(kind=="bonfire")DropdownMenuItem(text={Text("全部公告")},leadingIcon={Icon(AppIcons.Announcement,null)},onClick={showMenu=false;nav.screen="announcements"})
+                    if(room.isNotEmpty()) {
+                        DropdownMenuItem(text={Text("刷新消息")},enabled=!loading,leadingIcon={Icon(Icons.Outlined.Refresh,null)},onClick={showMenu=false;refresh++})
+                        DropdownMenuItem(text={Text("围炉成员")},leadingIcon={Icon(destinationIcon("firesides"),null)},onClick={showMenu=false;showMembers=true})
+                    }
+                }
+            }
         }
-        if(room.isNotEmpty())Row(Modifier.padding(horizontal=20.dp)){Text(roomTitle,Modifier.weight(1f),fontSize=22.sp);TextButton(onClick={showMembers=true}){Text("成员")}}
         if(kind=="mail")Row(Modifier.padding(horizontal=20.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){listOf("all" to "全部","received" to "收件箱","sent" to "已发送").forEach{(value,title)->FilterChip(selected=mailbox==value,onClick={mailbox=value},label={Text(title)})}}
-        if(kind=="bonfire")AnnouncementStrip(social)
-        if(kind=="bonfire")Row(Modifier.padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf(50,100,200).forEach{n->FilterChip(selected=limit==n,onClick={limit=n},label={Text("$n 条")})};TextButton(onClick={nav.screen="announcements"}){Text("公告")}}
-        OutlinedTextField(search,{search=it},Modifier.fillMaxWidth().padding(horizontal=20.dp),placeholder={Text("搜索消息或 Being")},singleLine=true)
-        TextButton(onClick={showFilters=!showFilters}){Text("筛选当前已加载消息")}
-        if(showFilters)Column(Modifier.padding(horizontal=20.dp)){
-            OutlinedTextField(filters.author,{filters=filters.copy(author=it)},label={Text("作者名称或 ID")},singleLine=true)
-            Row{listOf("all" to "全部","about" to "与我有关","mentions" to "提到我","mine" to "我发送的").forEach{(id,label)->TextButton(onClick={filters=filters.copy(relation=id)}){Text(if(filters.relation==id)"✓ $label" else label)}}}
-            Row{listOf(0 to "不限",1 to "一天",7 to "七天",30 to "三十天").forEach{(days,label)->TextButton(onClick={filters=filters.copy(days=days)}){Text(if(filters.days==days)"✓ $label" else label)}};TextButton(onClick={filters=filters.copy(oldestFirst=!filters.oldestFirst)}){Text(if(filters.oldestFirst)"最早优先" else "最新优先")}}
-        }
-        LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(28.dp)){
-            if(kind=="firesides"&&room.isEmpty())items(rooms.filter{search.isEmpty()||it.field("name","title").contains(search,true)},key={it.field("id","fireside_id")}){r->
+        LazyColumn(Modifier.weight(1f),state=listState,contentPadding=PaddingValues(start=20.dp,end=20.dp,top=8.dp,bottom=20.dp),verticalArrangement=Arrangement.spacedBy(20.dp)){
+            if(kind=="bonfire")item(key="announcements"){AnnouncementStrip(social)}
+            if(roomList)items(visibleRooms,key={it.field("id","fireside_id")}){r->
                 Row(Modifier.fillMaxWidth().clickable{room=r.field("id","fireside_id");roomTitle=r.field("name","title");rows=emptyList()}.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
                     Box(Modifier.size(48.dp).background(MaterialTheme.colorScheme.fireTint(),RoundedCornerShape(16.dp)),contentAlignment=Alignment.Center){Icon(destinationIcon("firesides"),null,Modifier.size(22.dp),tint=MaterialTheme.colorScheme.fireInk())}
                     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)){Text(r.field("name","title"),fontSize=16.sp,fontWeight=FontWeight.Medium,maxLines=2);r.field("description","topic").takeIf{it.isNotBlank()}?.let{Text(it,fontSize=13.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=2)}}
                     Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight,null,Modifier.size(16.dp))
                 }
             }
-            else items(rows.filter{filters.matches(it,social.identity?.id ?: "")&&(search.isEmpty()||it.toString().contains(search,true))}.let{if(filters.oldestFirst)it.reversed() else it}){row->
+            else items(visibleRows){row->
                 SocialMessageCard(row,kind){reply=row;composing=true}
             }
             error?.let{item{Text(it,color=MaterialTheme.colorScheme.error)}}
-            if(loading)item{CircularProgressIndicator()} else if(rows.isEmpty()&&(kind!="firesides"||rooms.isEmpty()))item{Text("暂无消息",color=MaterialTheme.colorScheme.onSurfaceVariant)}
+            if(loading)item{CircularProgressIndicator()} else if(error==null && (if(roomList)visibleRooms.isEmpty() else visibleRows.isEmpty()))item{
+                Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                    Text(if(filtered)"没有匹配的内容" else if(roomList)"暂无围炉" else "暂无消息",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    if(filtered)TextButton(onClick={search="";filters=FeedFilter()}){Text("清除搜索与筛选")}
+                }
+            }
         }
     }
     }
+    if(showFilters)SocialFilterSheet(roomList,kind,search,filters,limit,
+        onSearch={search=it},onFilters={filters=it},onLimit={limit=it},onDismiss={showFilters=false})
     if(composing)SocialComposeSheet(kind,room,roomTitle,reply,mailbox=="sent",m,social,nav,onDismiss={composing=false},onSent={composing=false;refresh++})
     if(showMembers) FiresideMembersSheet(room,social) { showMembers=false }
 }

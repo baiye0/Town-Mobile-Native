@@ -18,7 +18,8 @@ import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-data class Message(val role: String, val text: String, val sceneID:String?=null,val sequence:Int?=null,val kind:String?=null,val timestamp:String?=null,val sceneLabel:String?=null,val files:List<PendingAttachment>?=null,val process:String?=null)
+data class Message(val role: String, val text: String, val sceneID:String?=null,val sequence:Int?=null,val kind:String?=null,val timestamp:String?=null,val sceneLabel:String?=null,val files:List<PendingAttachment>?=null,val process:String?=null,
+    val id:String=UUID.randomUUID().toString(),val localBaseline:Int?=null,val replyTo:String?=null,val localAfter:String?=null,val streaming:Boolean?=null,val persistedText:String?=null)
 data class Room(val id: String = "mobile-${UUID.randomUUID()}", val endpoint: String, val title: String = "新对话", val messages: List<Message> = emptyList())
 class TownModel(app: Application) : AndroidViewModel(app) {
     private val vault = Vault(app)
@@ -38,12 +39,12 @@ class TownModel(app: Application) : AndroidViewModel(app) {
     private var historyCache=runCatching{JSONObject(historyFile.readText())}.getOrDefault(JSONObject())
     val mainID get()=connection?.let { scenePrefs.getString("main.${it.endpoint}",null) }
     private val displayState = derivedStateOf {
-        (if(showAllScenes) HistoryRules.merge(rooms.filter{it.endpoint==connection?.endpoint}.flatMap{r->r.messages.map{it.copy(sceneID=it.sceneID ?: r.id)}},timeline)
-        else (current?.messages.orEmpty()+if(showSBS)timeline.filter{it.sceneID==null&&it.role!="user"}else emptyList())
-            .withIndex().sortedWith(compareBy<IndexedValue<Message>>{it.value.sequence ?: Int.MAX_VALUE}.thenBy{it.index}).map{it.value})
-            .filter { it.text.isNotBlank() }
+        (if(showAllScenes) HistoryRules.merge(rooms.filter{it.endpoint==connection?.endpoint}.flatMap{r->r.messages.map{it.copy(sceneID=it.sceneID ?: r.id)}},timeline,activeMessageIDs)
+        else HistoryRules.ordered(current?.messages.orEmpty()+if(showSBS)timeline.filter{it.sceneID==null&&it.role!="user"}else emptyList()))
+            .filter { it.text.isNotBlank() || !it.files.isNullOrEmpty() }
     }
     val displayMessages get() = displayState.value
+    private val activeMessageIDs get()=outbox.flatMap{listOf(it.userID,it.replyID)+it.bubbles.orEmpty().map{b->b.id}}.toSet()
     private fun sceneIDs():List<String>{val a=directory.optJSONArray(connection?.endpoint ?: "") ?: JSONArray();return (0 until a.length()).map{a.getString(it)}}
     private fun saveDirectory(ids:List<String>){val c=connection ?: return;val next=JSONObject(directory.toString());next.put(c.endpoint,JSONArray(ids));directory=next;scenePrefs.edit().putString("directory",next.toString()).apply()}
     private fun ensureMain(){
@@ -117,6 +118,9 @@ class TownModel(app: Application) : AndroidViewModel(app) {
         }
     }
     var activity by mutableStateOf(""); private set
+    var activeSendID by mutableStateOf<String?>(null); private set
+    var submittedMessageID by mutableStateOf<String?>(null); private set
+    var streamingReplyID by mutableStateOf<String?>(null); private set
     var model by mutableStateOf("由 Being 管理"); private set
     private var streamID: String? = null
     private var call: Call? = null
@@ -138,6 +142,7 @@ class TownModel(app: Application) : AndroidViewModel(app) {
         runCatching { val data = JSONArray(file.readText()); rooms = (0 until data.length()).map { i -> val r = data.getJSONObject(i); val a = r.getJSONArray("messages"); Room(r.getString("id"), r.getString("endpoint"), r.getString("title"), (0 until a.length()).map { j -> val m = a.getJSONObject(j); HistoryRules.decodeLocal(m) }) } }
         timeline=historyCache.optJSONArray(connection?.endpoint ?: "")?.let{a->(0 until a.length()).map{HistoryRules.decode(a.getJSONObject(it))}} ?: emptyList()
         ensureMain(); selected = mainID; showSBS=scenePrefs.getBoolean("sbs.${connection?.endpoint}|$selected",false); connection?.let{hydrateHistory(it.endpoint)}
+        visibleOutbox.forEach{project(it)}
     }
     private fun persist():Boolean {
         return runCatching {
@@ -167,7 +172,7 @@ class TownModel(app: Application) : AndroidViewModel(app) {
         timeline.filter{it.sceneID!=null}.groupBy{it.sceneID!!}.forEach{(id,confirmed)->
             val old=rooms.find{it.id==id&&it.endpoint==endpoint}
             if(old==null)rooms=rooms+Room(id,endpoint,confirmed.firstNotNullOfOrNull{it.sceneLabel} ?: id,confirmed)
-            else rooms=rooms.map{if(it===old)it.copy(messages=HistoryRules.merge(old.messages.map{m->m.copy(sceneID=m.sceneID ?: id)},confirmed)) else it}
+            else rooms=rooms.map{if(it===old)it.copy(messages=HistoryRules.merge(old.messages.map{m->m.copy(sceneID=m.sceneID ?: id)},confirmed,activeMessageIDs)) else it}
         }
     }
     fun history() {
@@ -208,9 +213,9 @@ class TownModel(app: Application) : AndroidViewModel(app) {
     fun send(){
         if(outboxUnavailable)return;val c=connection ?: return;val text=draft.trim();if(text.isEmpty()&&attachments.isEmpty())return
         if(current==null)newChat();val room=current ?: return
-        val entry=PendingSend(endpoint=c.endpoint,sceneID=room.id,title=room.title,text=text,files=attachments.toMutableList(),baseline=timeline.mapNotNull{it.sequence}.maxOrNull() ?: 0,intelligentUI=intelligentUI)
+        val entry=PendingSend(endpoint=c.endpoint,sceneID=room.id,title=room.title,text=text,files=attachments.toMutableList(),baseline=timeline.mapNotNull{it.sequence}.maxOrNull() ?: 0,intelligentUI=intelligentUI,afterID=room.messages.lastOrNull{it.text.isNotBlank()||!it.files.isNullOrEmpty()}?.id)
         outbox=outbox+entry
-        try{saveOutbox();draft="";attachments=emptyList();intelligentUI=false;startDelivery()}catch(_:Exception){outbox=outbox.filter{it.id!=entry.id};notice="无法保存发送队列，草稿已保留。"}
+        try{saveOutbox();project(entry);persist();submittedMessageID=entry.userID;draft="";attachments=emptyList();intelligentUI=false;startDelivery()}catch(_:Exception){outbox=outbox.filter{it.id!=entry.id};notice="无法保存发送队列，草稿已保留。"}
     }
     fun changeQueued(id:String,text:String?=null,move:Int=0,remove:Boolean=false){
         val index=outbox.indexOfFirst{it.id==id};if(index<0)return;val entry=outbox[index]
@@ -221,28 +226,27 @@ class TownModel(app: Application) : AndroidViewModel(app) {
             if(entry.files.isEmpty()&&!text.isNullOrBlank()){entry.text=text.trim();entry.preparedText=null}
             if(move!=0){val peers=outbox.indices.filter{outbox[it].endpoint==entry.endpoint&&outbox[it].phase=="queued"};val p=peers.indexOf(index);if(p+move in peers.indices){val list=outbox.toMutableList();java.util.Collections.swap(list,index,peers[p+move]);outbox=list}}
         }
-        try{outbox=outbox.map{it.copy()};saveOutbox();if(remove&&notice=="发送未完成，请查看发送队列。"&&!visibleOutbox.any{it.phase in listOf("failed","unknown")})notice=null;startDelivery()}catch(_:Exception){outbox=old;notice="无法保存队列修改。"}
+        try{outbox=outbox.map{it.copy()};saveOutbox();if(remove)rooms=rooms.map{r->if(r.endpoint==entry.endpoint&&r.id==entry.sceneID)r.copy(messages=r.messages.filterNot{it.sequence==null&&(it.id==entry.userID||it.replyTo==entry.userID||it.kind in listOf(entry.userID,entry.replyID))}) else r} else project(entry);persist();if(remove&&notice=="发送未完成，请查看发送队列。"&&!visibleOutbox.any{it.phase in listOf("failed","unknown")})notice=null;startDelivery()}catch(_:Exception){outbox=old;notice="无法保存队列修改。"}
     }
     fun retryQueued(id:String){val entry=outbox.find{it.id==id&&it.phase=="failed"} ?: return;entry.phase="queued";entry.error=null;entry.files.filter{it.attachmentID!=null&&it.jobID==null}.forEach{it.forceParse=true};try{saveOutbox();startDelivery()}catch(_:Exception){entry.phase="failed";notice="无法保存发送状态。"}}
     fun resumeDelivery(){startDelivery(true)}
     private fun checkpoint(entry:PendingSend){outbox=outbox.map{if(it.id==entry.id)entry.copy() else it};saveOutbox()}
     private fun project(entry:PendingSend){
-        rooms=rooms.map{room->if(room.id!=entry.sceneID||room.endpoint!=entry.endpoint)room else {
-            val messages=room.messages.toMutableList()
-            listOf(Message("user",entry.preparedText ?: entry.text,entry.sceneID,kind="local:${entry.id}:user",files=entry.files),Message("being",entry.reply,entry.sceneID,kind="local:${entry.id}:reply",process=entry.process)).forEach{m->val i=messages.indexOfFirst{it.kind==m.kind};if(i>=0)messages[i]=m else messages.add(m)}
-            room.copy(messages=messages)
-        }}
+        rooms=rooms.map{room->if(room.id!=entry.sceneID||room.endpoint!=entry.endpoint)room else room.copy(messages=ReplyStream.project(room.messages,entry))}
+        if(busy&&activeSendID==entry.id&&entry.phase in listOf("sending","waiting"))ReplyStream.messages(entry).lastOrNull{it.text.isNotEmpty()}?.let{streamingReplyID=it.id}
     }
     private fun consume(type:String,data:JSONObject,entry:PendingSend){
-        data.nullString("stream_id")?.let{entry.streamID=it;streamID=it}
         if(data.has("scene_id")&&data.isNull("scene_id")){sbsActivity=if(type in listOf("message_stop","done","end"))"" else "正在自主活动";return}
         if(data.nullString("scene_id")?.let{it!=entry.sceneID}==true)return
+        data.nullString("stream_id")?.let{entry.streamID=it;streamID=it}
+        ReplyStream.consume(type,data,entry)
         when(type){
-            "content_block_delta"->{val delta=data.optJSONObject("delta");val kind=delta?.optString("type","") ?: "";if(kind.isEmpty()||kind=="text_delta")entry.reply+=delta?.optString("text","") ?: "";activity="正在回复"}
-            "text","message"->{val text=data.opt("text") ?: data.opt("content");if(text is String){entry.reply+=text;activity="正在回复"}}
-            "thinking","reasoning"->{activity="思考中";entry.process+=data.optString("text",data.optString("content"))}
+            "content_block_delta"->{val delta=data.optJSONObject("delta");if(!(delta?.opt("text") as? String).isNullOrEmpty())activity="正在回复" else (delta?.opt("thinking") as? String)?.takeIf{it.isNotEmpty()}?.let{entry.process+=it;activity="思考中"}}
+            "text","message"->{if(!((data.opt("text") ?: data.opt("content")) as? String).isNullOrEmpty())activity="正在回复"}
+            "thinking","reasoning"->{activity="思考中";entry.process+=ReplyStream.reasoningText(data)}
             "tool_use"->{activity="正在使用 ${data.optString("name","工具")}";entry.process+="\n$activity\n${data.opt("input") ?: ""}"}
             "tool_result"->{entry.process+="\n${data.opt("content") ?: data.opt("result") ?: ""}";activity="思考中"}
+            "message_stop"->{if(!ReplyStream.hasFinalReply(entry))activity="等待最终回复"}
             "error"->error("Being 返回错误")
         };entry.process=entry.process.takeLast(64000)
     }
@@ -254,7 +258,7 @@ class TownModel(app: Application) : AndroidViewModel(app) {
         if(head>=endpointItems.size)return
         val first=endpointItems[head].value
         if(first.phase !in listOf("queued","preparing")&&!(recover&&first.phase in listOf("sending","waiting","unknown")))return
-        busy=true;activeScene=first.sceneID
+        busy=true;activeScene=first.sceneID;activeSendID=first.id
         worker=viewModelScope.launch {
             val entry=PendingSend.read(first.json());var safe=false
             try{
@@ -281,18 +285,19 @@ class TownModel(app: Application) : AndroidViewModel(app) {
                                     if(r.code!=200){if(r.code in 400..499)entry.phase="failed";error("HTTP ${r.code}")}
                                     check(r.header("Content-Type","")!!.contains("text/event-stream"))
                                     val parser=SSEParser();val source=r.body!!.source();var complete=false;var lastSaved=0L
+                                    val presentation=StreamPresentation(viewModelScope){project(it)}
                                     suspend fun handleEvent(event:SSEEvent){
                                         if(event.data=="[DONE]"){complete=true;return}
-                                        val data=JSONObject(event.data);val type=if(event.name=="message")data.optString("type","message") else event.name
+                                        val data=ReplyStream.payload(event) ?: return;val type=if(event.name=="message")data.optString("type","message") else event.name
                                         withContext(Dispatchers.Main) consumeEvent@ {
                                             if(DeliveryRules.countsForReplay(type,data.optBoolean("continuation"),data.has("persisted")))entry.cursor++
                                             consume(type,data,entry)
                                             if(data.has("scene_id")&&data.nullString("scene_id")!=entry.sceneID)return@consumeEvent
                                             if(type in listOf("done","end"))complete=true else if(type in listOf("text","content_block_delta","tool_use","thinking","reasoning"))complete=false
-                                            if(System.currentTimeMillis()-lastSaved>500){checkpoint(entry);lastSaved=System.currentTimeMillis()};project(entry)
+                                            if(System.currentTimeMillis()-lastSaved>500){checkpoint(entry);lastSaved=System.currentTimeMillis()};presentation.submit(entry)
                                         }
                                     }
-                                    while(true){
+                                    try { while(true){
                                         ensureActive();val line=source.readUtf8Line() ?: break;check(line.length<=1024*1024)
                                         val event=parser.line(line) ?: continue
                                         handleEvent(event)
@@ -301,8 +306,10 @@ class TownModel(app: Application) : AndroidViewModel(app) {
                                     // treat EOF as the end of the turn, as the
                                     // Town Client does when [DONE] is omitted.
                                     parser.line("")?.let{handleEvent(it)}
-                                    if(!complete&&entry.reply.isNotEmpty())complete=true
-                                    safe=complete&&entry.reply.isNotEmpty()
+                                    withContext(Dispatchers.Main){ReplyStream.finish(entry);presentation.submit(entry)}
+                                    if(!complete&&ReplyStream.hasFinalReply(entry))complete=true
+                                    safe=complete&&ReplyStream.hasFinalReply(entry)
+                                    } finally { withContext(NonCancellable+Dispatchers.Main){presentation.flush()} }
                                 }
                             }
                         }
@@ -311,13 +318,14 @@ class TownModel(app: Application) : AndroidViewModel(app) {
                 if(!safe){project(entry);safe=this@TownModel.recover(entry,c)}
                 if(safe){try{reconcile(entry,c)}catch(e:CancellationException){throw e}catch(_:Exception){};check(persist()){ "无法保存已完成的回复" };val previous=outbox;outbox=outbox.filter{it.id!=entry.id};try{saveOutbox()}catch(e:Exception){outbox=previous;throw e};if(notice=="发送未完成，请查看发送队列。")notice=null;CompletionNotifications.finished(getApplication(),c.endpoint,entry.sceneID,entry.title,!appActive||!chatVisible||selected!=entry.sceneID)}
                 else{entry.phase="unknown";entry.error="发送结果待确认；可同步历史或移除本地等待记录，不会自动重发。";checkpoint(entry)}
-            }catch(e:CancellationException){throw e}catch(e:Exception){entry.phase=if(entry.phase in listOf("queued","preparing","failed"))"failed" else "unknown";entry.error=e.message;runCatching{checkpoint(entry);project(entry)};if(notice=="发送未完成，请查看发送队列。")notice=null}
-            finally{busy=false;activeScene=null;streamID=null;activity="";call=null;worker=null;persist();startDelivery()}
+            }catch(e:CancellationException){if(outbox.find{it.id==entry.id}?.phase=="stopped"){entry.phase="stopped";ReplyStream.finish(entry);runCatching{checkpoint(entry);project(entry)}};throw e}catch(e:Exception){entry.phase=if(entry.phase in listOf("queued","preparing","failed"))"failed" else "unknown";entry.error=e.message;runCatching{checkpoint(entry);project(entry)};if(notice=="发送未完成，请查看发送队列。")notice=null}
+            finally{busy=false;activeScene=null;activeSendID=null;streamingReplyID=null;streamID=null;activity="";call=null;worker=null;persist();startDelivery()}
         }
     }
     private suspend fun recover(entry:PendingSend,c:Connection):Boolean{
         activity="正在恢复回复"
-        repeat(120){attempt->
+        var idleSince=System.currentTimeMillis();var attempt=0;var failures=0
+        while(System.currentTimeMillis()-idleSince<300000){
             currentCoroutineContext().ensureActive()
             try{
                 val response=withContext(Dispatchers.IO){client.newCall(request(c,"/api/stream/active?after=${entry.cursor}")).execute().use{it.code to it.body?.string()}}
@@ -329,12 +337,13 @@ class TownModel(app: Application) : AndroidViewModel(app) {
                 else{
                     entry.streamID=id;streamID=id;val events=data.optJSONArray("events") ?: JSONArray()
                     if(events.length()>0&&events.getJSONObject(0).optInt("seq")>entry.cursor+1)return reconcile(entry,c)
-                    for(i in 0 until events.length()){val event=events.getJSONObject(i);val seq=event.optInt("seq");if(seq<=entry.cursor)continue;consume(event.optString("event"),event.optJSONObject("data") ?: JSONObject(),entry);entry.cursor=seq}
+                    for(i in 0 until events.length()){val event=events.getJSONObject(i);val seq=event.optInt("seq");if(seq<=entry.cursor)continue;val type=event.optString("event");val value=event.optJSONObject("data") ?: JSONObject();if(ReplyStream.isProgress(type,value,entry.sceneID))idleSince=System.currentTimeMillis();consume(type,value,entry);entry.cursor=seq}
                     checkpoint(entry);project(entry)
                     if(data.optBoolean("finished"))return reconcile(entry,c)
                 }
-            }catch(e:CancellationException){throw e}catch(e:Exception){if(attempt>=5)throw e}
-            delay(minOf(5000L,1000L+attempt/3*1000L))
+                failures=0
+            }catch(e:CancellationException){throw e}catch(e:Exception){failures++;if(failures>=5)throw e}
+            attempt++;delay(minOf(5000L,1000L+attempt/3*1000L))
         };return false
     }
     private suspend fun historyBaseline(c:Connection,after:Int):Int {
@@ -349,11 +358,14 @@ class TownModel(app: Application) : AndroidViewModel(app) {
             if(rows.isEmpty())break
             for(row in rows.filter{it.nullString("scene_id")==entry.sceneID}){
                 val text=HistoryRules.text(row.opt("content"))
-                if(row.optString("role")=="user"){if(sawUser){ended=true;break};sawUser=SceneRules.stripTransition(text)==(entry.preparedText ?: entry.text);if(sawUser)confirmed.add(HistoryRules.decode(row).copy(files=entry.files))}
+                if(row.optString("role")=="user"){if(sawUser){ended=true;break};sawUser=DeliveryRules.matchesSubmittedText(text,entry.preparedText ?: entry.text);if(sawUser)confirmed.add(HistoryRules.decode(row).copy(files=entry.files))}
                 else if(sawUser&&row.optString("type")!="marker"&&row.optString("from")!="system"){if(reply.isNotEmpty())reply.append("\n\n");reply.append(text);confirmed.add(HistoryRules.decode(row))}
             };cursor=rows.maxOf{it.optInt("seq")}
         }
-        if(!sawUser||reply.isEmpty())return false;entry.reply=reply.toString();confirmed[confirmed.lastIndex]=confirmed.last().copy(process=entry.process);rooms=rooms.map{if(it.id==entry.sceneID&&it.endpoint==entry.endpoint)it.copy(messages=HistoryRules.merge(it.messages.filter{m->m.kind !in listOf("local:${entry.id}:user","local:${entry.id}:reply")},confirmed)) else it};return true
+        if(!sawUser||reply.isEmpty())return false;entry.reply=reply.toString()
+        val bound=ReplyStream.bindHistory(confirmed,entry)
+        val replaced=bound.map{it.id}.toSet();val sequences=bound.mapNotNull{it.sequence}.toSet()
+        rooms=rooms.map{if(it.id==entry.sceneID&&it.endpoint==entry.endpoint)it.copy(messages=HistoryRules.merge(it.messages.filterNot{m->m.id in replaced||m.sequence in sequences},bound)) else it};return true
     }
     fun interruptQueued(id:String){
         val c=connection ?: return;val scene=activeScene ?: return;val stream=streamID ?: return

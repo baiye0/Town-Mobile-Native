@@ -44,6 +44,17 @@ ANDROID_HOME="$HOME/Library/Android/sdk" \
 
 APK：`android/app/build/outputs/apk/debug/app-debug.apk`。
 
+Windows 使用 JDK 21，设置 `JAVA_HOME` 指向 JDK 目录、`ANDROID_HOME` 指向 Android SDK 目录，并将 JDK 的 `bin` 和 SDK 的 `platform-tools` 加入 `PATH`。SDK 需安装 `platforms;android-36` 和 `build-tools;35.0.0`；在 `android/local.properties` 中填写 SDK 路径，例如 `sdk.dir=D\:/env/android-sdk`（目录分隔符使用 `/`，盘符冒号写作 `\:`，该文件不会提交）。环境变量设置后重新打开 PowerShell，在仓库根目录执行：
+
+```powershell
+.\android\gradlew.bat -p android :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --max-workers=2
+adb devices -l
+adb -d install -r .\android\app\build\outputs\apk\debug\app-debug.apk
+adb -d shell am start -n town.beings.nativeapp/town.nativeapp.MainActivity
+```
+
+手机需开启 USB 调试并允许此电脑连接；部分手机（如 Redmi）还需在开发者选项开启「USB 安装」，安装时如手机弹出确认，请允许安装。`-d` 选择唯一一台 USB 真机，多台真机连接时改用 `-s 设备序列号`。
+
 模拟器使用 `ios/Simulator.entitlements` 声明仅模拟器适用的应用标识和钥匙串组。请勿使用 `CODE_SIGNING_ALLOWED=NO` 运行凭据保存功能。真机仍使用自己的 Apple Development Team，由 Xcode 生成正式权限。
 
 ## 验证边界

@@ -38,13 +38,17 @@ private fun inlineText(value:String)=buildAnnotatedString {
             "rule"->HorizontalDivider()
             "code"->if(b.label.lowercase()=="intelligent-ui")NativeUIView(b.text) else NativeCodeBlock(b.text,b.label,previewMarkdownCode)
             "table"->Column(Modifier.horizontalScroll(rememberScrollState())){b.rows.forEachIndexed{index,row->
-                Row{row.forEach{cell->SelectionContainer{Text(inlineText(cell),Modifier.width(150.dp).background(if(index==0)MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface).padding(10.dp),fontSize=13.sp,fontWeight=if(index==0)FontWeight.SemiBold else FontWeight.Normal)}}};HorizontalDivider()
+                Row{row.forEach{cell->MarkdownSelection{Text(inlineText(cell),Modifier.width(150.dp).background(if(index==0)MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface).padding(10.dp),fontSize=13.sp,fontWeight=if(index==0)FontWeight.SemiBold else FontWeight.Normal)}}};HorizontalDivider()
             }}
-            "list"->Row(Modifier.padding(start=(b.level*16).dp)){Text(b.label,Modifier.width(24.dp),color=textColor);SelectionContainer{Text(inlineText(b.text),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor)}}
-            "quote"->Row{Box(Modifier.width(3.dp).heightIn(min=28.dp).background(MaterialTheme.colorScheme.outline));SelectionContainer{Text(inlineText(b.text),Modifier.padding(start=12.dp),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor.copy(alpha=0.8f))}}
-            else->SelectionContainer{Text(inlineText(b.text),color=textColor,fontSize=(if(b.kind=="heading")when(b.level){1->size+4;2->size+2;else->size}else size).sp,fontWeight=if(b.kind=="heading")FontWeight.SemiBold else FontWeight.Normal,lineHeight=(size+9).sp)}
+            "list"->Row(Modifier.padding(start=(b.level*16).dp)){Text(b.label,Modifier.width(24.dp),color=textColor);MarkdownSelection{Text(inlineText(b.text),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor)}}
+            "quote"->Row{Box(Modifier.width(3.dp).heightIn(min=28.dp).background(MaterialTheme.colorScheme.outline));MarkdownSelection{Text(inlineText(b.text),Modifier.padding(start=12.dp),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor.copy(alpha=0.8f))}}
+            else->MarkdownSelection{Text(inlineText(b.text),color=textColor,fontSize=(if(b.kind=="heading")when(b.level){1->size+4;2->size+2;else->size}else size).sp,fontWeight=if(b.kind=="heading")FontWeight.SemiBold else FontWeight.Normal,lineHeight=(size+9).sp)}
         }}
     }
+}
+
+@Composable private fun MarkdownSelection(content:@Composable ()->Unit) {
+    if(LocalMessageContextMenu.current)content() else SelectionContainer(content=content)
 }
 
 @Composable private fun NativeCodeBlock(text:String,language:String,allowPreview:Boolean){
