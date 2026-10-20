@@ -43,6 +43,10 @@ enum Vault {
         guard status == errSecSuccess else { throw PortalError.server("无法更新钥匙串（\(status)）：\(SecCopyErrorMessageString(status, nil) as String? ?? "")") }
     }
 }
+@MainActor final class ComposerState: ObservableObject {
+    @Published var draft = ""
+}
+
 @MainActor final class Store: ObservableObject {
     @Published var connection = Vault.load() { didSet { displayRevision += 1; sbsEnabled = nil; sbsActivity = ""; sbsError = nil; sbsRevision += 1 } }
     @Published var conversations: [Conversation] = [] { didSet { displayRevision += 1 } }
@@ -73,7 +77,7 @@ enum Vault {
         return HistoryRules.ordered(messages + shared)
     }
     private var activeMessageIDs: Set<UUID> {
-        Set(visibleOutbox.flatMap { [$0.userID, $0.replyID] })
+        Set(visibleOutbox.flatMap { [$0.userID, $0.replyID] + ($0.bubbles ?? []).map(\.id) })
     }
     func ensureMain() {
         guard let c = connection else { return }
@@ -103,7 +107,11 @@ enum Vault {
         saveDirectory(); selectScene(scene); persist()
     }
     @Published var intelligentUI = false
-    @Published var draft = ""
+    let composer = ComposerState()
+    var draft: String {
+        get { composer.draft }
+        set { composer.draft = newValue }
+    }
     private var sceneDrafts: [String:String] = [:]
     private var sceneAttachments: [String:[PendingAttachment]] = [:]
     @Published var busy = false
@@ -111,10 +119,12 @@ enum Vault {
     @Published var outbox: [PendingSend] = [] { didSet { displayRevision += 1 } }
     @Published var outboxUnavailable = false
     @Published var submittedMessageID: UUID?
+    @Published var streamingReplyID: UUID?
     @Published var attachments: [PendingAttachment] = []
     var appActive = true
     var chatVisible = true
     var worker: Task<Void, Never>?
+    var activeSendID: String?
     @Published var connecting = false
     @Published var notice: String?
     @Published var activity = ""
@@ -202,7 +212,7 @@ enum Vault {
         historyLoading = true; defer { historyLoading = false }
         var cached = cachedHistory[c.endpoint] ?? []
         var cursor = cached.compactMap(\.sequence).max() ?? 0
-        timeline = cached; hydrateHistory(c.endpoint); persist()
+        if timeline != cached { timeline = cached; hydrateHistory(c.endpoint) }
         let initial = cursor == 0
         if notice?.hasPrefix("历史记录") == true { notice = nil }
         do {
@@ -238,7 +248,7 @@ enum Vault {
         guard let c = connection, let streamID else { notice = "正在等待服务确认，稍后可停止。"; return }
         let activeTask = worker
         let scene = activeScene
-        let entryID = outbox.first { $0.endpoint == c.endpoint && $0.sceneID == scene && $0.phase != "queued" }?.id
+        let entryID = activeSendID
         do {
             let (_, response) = try await session.data(for: request(c, "/api/stop", method: "POST", body: ["stream_id": streamID]))
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw PortalError.http((response as? HTTPURLResponse)?.statusCode ?? 0) }

@@ -43,3 +43,31 @@ import Testing
     #expect(HistoryRules.merge([stale], [historical, duplicate]).count == 3)
     #expect(HistoryRules.merge([Message(role: "being", text: "prefix short", sceneID: "a")], [Message(role: "being", text: "short", sceneID: "a", sequence: 1)]).count == 2)
 }
+
+@Test func confirmedPromptCannotJumpBelowItsStreamingReplyOrQueuedFollowup() {
+    let prompt = Message(role: "user", text: "question", sceneID: "s", localBaseline: 10)
+    let reply = Message(role: "being", text: "partial", sceneID: "s", localBaseline: 10, replyTo: prompt.id)
+    let queued = Message(role: "user", text: "next", sceneID: "s", localBaseline: 10, localAfter: reply.id)
+    let remote = Message(role: "user", text: "question", sceneID: "s", sequence: 11)
+    let merged = HistoryRules.merge([prompt, reply, queued], [remote], activeIDs: [prompt.id, reply.id])
+    #expect(merged.map(\.id) == [prompt.id, reply.id, queued.id])
+    #expect(HistoryRules.merge(merged, [remote]).map(\.id) == merged.map(\.id))
+    let confirmedReply = Message(role: "being", text: "partial", sceneID: "s", sequence: 12)
+    let final = HistoryRules.merge(merged, [remote, confirmedReply])
+    #expect(final.map(\.id) == [prompt.id, reply.id, queued.id])
+}
+
+@Test func nextReplyStaysAfterThePreviousPersistedBubble() {
+    let user = Message(role: "user", text: "q", sceneID: "s", sequence: 11)
+    let first = Message(role: "being", text: "first", sceneID: "s", sequence: 12, replyTo: user.id)
+    let next = Message(role: "being", text: "next", sceneID: "s", localBaseline: 10, replyTo: user.id, localAfter: first.id)
+    #expect(HistoryRules.ordered([next, first, user]).map(\.text) == ["q", "first", "next"])
+}
+
+@Test func identicalRepliesMatchHistoryInTheirOriginalOrder() {
+    let a = Message(role: "being", text: "same", sceneID: "s", localBaseline: 10)
+    let b = Message(role: "being", text: "same", sceneID: "s", localBaseline: 10, localAfter: a.id)
+    let remote = [Message(role: "being", text: "same", sceneID: "s", sequence: 12),
+                  Message(role: "being", text: "same", sceneID: "s", sequence: 11)]
+    #expect(HistoryRules.merge([a, b], remote).map(\.id) == [a.id, b.id])
+}

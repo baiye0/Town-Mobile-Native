@@ -33,9 +33,10 @@ extension Store {
         }
         var next = messageDeletions
         next.append(MessageDeletion(removed, endpoint: endpoint))
-        if let entry,
-           let reply = conversations.first(where: { $0.endpoint == endpoint && $0.id == entry.sceneID })?.messages.first(where: { $0.id == entry.replyID && $0.sequence == nil }) {
-            next.append(MessageDeletion(reply, endpoint: endpoint))
+        if let entry, let room = conversations.first(where: { $0.endpoint == endpoint && $0.id == entry.sceneID }) {
+            for reply in room.messages where reply.sequence == nil && (reply.id == entry.replyID || reply.replyTo == entry.userID) {
+                next.append(MessageDeletion(reply, endpoint: endpoint))
+            }
         }
         do {
             // Persist the tombstone first. On a crash, loadOutbox also drops

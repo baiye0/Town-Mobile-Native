@@ -35,9 +35,24 @@ public enum HistoryRules {
 extension HistoryRules {
     static func merge(_ local: [Message], _ confirmed: [Message], activeIDs: Set<UUID> = []) -> [Message] {
         var indexed = Dictionary(local.compactMap { m in m.sequence.map { ($0,m) } }, uniquingKeysWith: { _,new in new })
-        for var m in confirmed { if let seq = m.sequence { m.id = indexed[seq]?.id ?? m.id; m.files = m.files ?? indexed[seq]?.files; m.process = m.process ?? indexed[seq]?.process; indexed[seq] = m } }
+        for var message in confirmed {
+            guard let seq = message.sequence else { continue }
+            if let local = indexed[seq] {
+                message.id = local.id
+                message.files = message.files ?? local.files
+                message.process = message.process ?? local.process
+                message.replyTo = message.replyTo ?? local.replyTo
+                message.localAfter = message.localAfter ?? local.localAfter
+                if local.streaming == true, message.streaming != false {
+                    message.persistedText = message.text
+                    message.text = local.text
+                    message.streaming = true
+                }
+            }
+            indexed[seq] = message
+        }
         let known = Set(local.compactMap(\.sequence))
-        var echoes = confirmed.filter { $0.sequence.map { !known.contains($0) } ?? false }
+        var echoes = confirmed.filter { $0.sequence.map { !known.contains($0) } ?? false }.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }
         let attachmentMarker = try! NSRegularExpression(pattern: "(?m)^\\[attachment-message:v1:msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*\\]\\r?$")
         func attachmentLine(_ text: String) -> String? { text.split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix("[attachment-message:v1:") }).map(String.init) }
         let pending = local.filter { m in
@@ -45,17 +60,24 @@ extension HistoryRules {
             if role(m.role) == "being" && m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
             let hasAttachment = attachmentMarker.firstMatch(in: m.text, range: NSRange(m.text.startIndex..., in: m.text)) != nil
             let candidates = hasAttachment ? confirmed : echoes
-            if let matched = candidates.lastIndex(where: { candidate in
+            if let matched = candidates.firstIndex(where: { candidate in
                 guard role(candidate.role) == role(m.role), candidate.sceneID == m.sceneID,
                       m.localBaseline.map({ $0 < (candidate.sequence ?? 0) }) ?? true else { return false }
                 if hasAttachment { return attachmentLine(candidate.text) == attachmentLine(m.text) }
-                return candidate.text == SceneRules.stripTransition(m.text)
+                return DeliveryRules.matchesSubmittedText(candidate.text, m.text)
             }) {
                 let row = candidates[matched]
                 if let seq = row.sequence, var merged = indexed[seq] {
                     if !known.contains(seq) { merged.id = m.id }
                     merged.files = m.files ?? merged.files
                     merged.process = m.process ?? merged.process
+                    merged.replyTo = m.replyTo ?? merged.replyTo
+                    merged.localAfter = m.localAfter ?? merged.localAfter
+                    if m.streaming == true {
+                        merged.streaming = true
+                        merged.persistedText = merged.text
+                        merged.text = m.text
+                    }
                     indexed[seq] = merged
                 }
                 if !hasAttachment { echoes.remove(at: matched) }
@@ -84,11 +106,29 @@ extension HistoryRules {
     }
 
     static func ordered(_ messages: [Message]) -> [Message] {
-        messages.enumerated().sorted { lhs, rhs in
+        // A streaming reply stays after its own prompt when history assigns
+        // that prompt a server sequence before the reply has been confirmed.
+        let parents = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        var positions: [UUID: (Int, Int)] = [:]
+        func position(_ message: Message, visiting: Set<UUID> = []) -> (Int, Int) {
+            if let cached = positions[message.id] { return cached }
+            if let sequence = message.sequence { return (sequence, 0) }
+            let baseline = message.localBaseline ?? Int.max
+            guard !visiting.contains(message.id),
+                  let id = message.localAfter ?? message.replyTo, let parent = parents[id],
+                  parent.sceneID == message.sceneID else { return (baseline, 1) }
+            let preceding = position(parent, visiting: visiting.union([message.id]))
+            let result = (max(baseline, preceding.0), preceding.0 >= baseline ? preceding.1 + 1 : 1)
+            positions[message.id] = result
+            return result
+        }
+        // Resolve anchors before sorting; the comparator remains a pure ordering.
+        for message in messages { positions[message.id] = position(message) }
+        return messages.enumerated().sorted { lhs, rhs in
             let a = lhs.element, b = rhs.element
-            let left = a.sequence ?? a.localBaseline ?? Int.max
-            let right = b.sequence ?? b.localBaseline ?? Int.max
-            if left != right { return left < right }
+            let left = positions[a.id]!, right = positions[b.id]!
+            if left.0 != right.0 { return left.0 < right.0 }
+            if left.1 != right.1 { return left.1 < right.1 }
             if (a.sequence != nil) != (b.sequence != nil) { return a.sequence != nil }
             if a.sequence == nil, let at = a.timestamp, let bt = b.timestamp, at != bt { return at < bt }
             return lhs.offset < rhs.offset

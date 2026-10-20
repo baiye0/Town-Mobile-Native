@@ -104,3 +104,16 @@ struct LegacyChatScrollMetrics: Equatable {
     var height: CGFloat = 0
 }
 private struct ChatScrollMetrics: Equatable { var bottom: Bool; var offset: CGFloat; var height: CGFloat }
+
+struct StreamReplyGeometry: ViewModifier {
+    let tracked: Bool
+    let viewportHeight: CGFloat
+    @Binding var fillsViewport: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if tracked {
+            content.onGeometryChange(for: Bool.self) { geometry in
+                viewportHeight > 0 && geometry.size.height >= viewportHeight - 20
+            } action: { fillsViewport = $0 }
+        } else { content }
+    }
+}

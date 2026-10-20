@@ -3,6 +3,35 @@ import XCTest
 @testable import Town
 
 @MainActor final class CompatibilityStateTests: XCTestCase {
+    func testProcessIsVisibleBeforeTextAndStaysOnTheInitiatingTurn() throws {
+        let store = Store()
+        let connection = try Connection("https://example.invalid/progress?token=test")
+        store.connection = connection
+        store.selected = "s"
+        store.showAllScenes = true
+        store.timeline = []
+        store.conversations = [Conversation(id: "s", endpoint: connection.endpoint)]
+        var entry = PendingSend(endpoint: connection.endpoint, sceneID: "s", title: "s", text: "question")
+        try store.consume("reasoning", ["delta": "检查上下文"], entry: &entry)
+        store.project(entry)
+        XCTAssertEqual(store.displayMessages.count, 1)
+        XCTAssertEqual(store.displayMessages[0].process, "检查上下文")
+        // A refresh has already acknowledged the initiating user message.
+        store.conversations[0].messages[0].sequence = 11
+        try store.consume("content_block_delta", ["delta": ["type": "thinking_delta", "thinking": "，检查细节"]], entry: &entry)
+        try store.consume("content_block_delta", ["delta": ["type": "provider_text", "text": "逐步"]], entry: &entry)
+        store.project(entry)
+        XCTAssertEqual(store.displayMessages.last?.text, "逐步")
+        XCTAssertEqual(store.displayMessages.first?.process, "检查上下文，检查细节")
+        XCTAssertEqual(store.displayMessages.first?.sequence, 11)
+        XCTAssertNil(store.displayMessages.last?.process)
+        try store.consume("content_block_delta", ["delta": ["text": "显示"]], entry: &entry)
+        store.project(entry)
+        XCTAssertEqual(store.displayMessages.last?.text, "逐步显示")
+        try store.consume("reasoning", ["scene_id": "other", "text": "其他场景"], entry: &entry)
+        XCTAssertFalse(entry.process.contains("其他场景"))
+    }
+
     func testNestedMessageMutationPublishesAndInvalidatesDisplayCache() throws {
         let store = Store()
         let connection = try Connection("https://example.invalid/compat?token=test")
@@ -34,10 +63,67 @@ import XCTest
         store.selected = "two"
         XCTAssertEqual(store.displayMessages.first?.text, "two")
         var drafts: [String] = []
-        let observation = store.$draft.dropFirst().sink { drafts.append($0) }
+        let observation = store.composer.$draft.dropFirst().sink { drafts.append($0) }
         store.draft = "retained draft"
         XCTAssertEqual(drafts, ["retained draft"])
         withExtendedLifetime(observation) {}
+    }
+
+    func testTypingPublishesOnlyComposerChanges() {
+        let store = Store()
+        var storeUpdates = 0
+        var drafts: [String] = []
+        let storeObservation = store.objectWillChange.sink { storeUpdates += 1 }
+        let draftObservation = store.composer.$draft.dropFirst().sink { drafts.append($0) }
+        for value in ["n", "ni", "你", "你好"] { store.draft = value }
+        XCTAssertEqual(storeUpdates, 0)
+        XCTAssertEqual(drafts, ["n", "ni", "你", "你好"])
+        withExtendedLifetime((storeObservation, draftObservation)) {}
+    }
+
+    func testStreamPresentationCoalescesAndFlushesFinalReply() async throws {
+        var snapshots: [PendingSend] = []
+        let presentation = StreamPresentation { snapshots.append($0) }
+        var entry = PendingSend(endpoint: "https://example.invalid", sceneID: "s", title: "s", text: "prompt")
+        for index in 1...1000 {
+            entry.reply += "字"
+            entry.cursor = index
+            presentation.submit(entry)
+        }
+        XCTAssertTrue(snapshots.isEmpty)
+        presentation.flush()
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].cursor, 1000)
+        XCTAssertEqual(snapshots[0].reply.count, 1000)
+        presentation.flush()
+        XCTAssertEqual(snapshots.count, 1)
+        entry.reply += "末尾"
+        presentation.submit(entry)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(snapshots.count, 2)
+        XCTAssertEqual(snapshots.last?.reply, entry.reply)
+    }
+
+    func testHistoryAcknowledgementDoesNotFreezeAnActiveReply() throws {
+        let store = Store()
+        let connection = try Connection("https://example.invalid/live?token=test")
+        store.connection = connection
+        var entry = PendingSend(endpoint: connection.endpoint, sceneID: "s", title: "s", text: "question")
+        entry.phase = "sending"
+        store.conversations = [Conversation(id: "s", endpoint: connection.endpoint)]
+        ReplyStream.consume("text", ["text": "first"], entry: &entry)
+        store.project(entry)
+        let remote = Message(role: "being", text: "first", sceneID: "s", sequence: 12)
+        store.conversations[0].messages = HistoryRules.merge(store.conversations[0].messages, [remote])
+        ReplyStream.consume("text", ["text": " second"], entry: &entry)
+        store.project(entry)
+        let reply = try XCTUnwrap(store.conversations[0].messages.first { $0.id == entry.replyID })
+        XCTAssertEqual(reply.sequence, 12)
+        XCTAssertEqual(reply.text, "first second")
+        XCTAssertEqual(store.conversations[0].messages.filter { $0.role == "being" }.count, 1)
+        ReplyStream.finish(&entry)
+        store.project(entry)
+        XCTAssertEqual(store.conversations[0].messages.first { $0.id == entry.replyID }?.text, "first second")
     }
 
     func testSocialUnreadDictionaryMutationPublishes() {

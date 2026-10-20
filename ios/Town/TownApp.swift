@@ -18,13 +18,15 @@ struct RootView: View {
     @State private var settings = false
     @StateObject private var speech = SpeechInput()
     @State private var actionsExpanded = false
+    @State private var cameraRequested = false
+    @State private var cameraPresented = false
     @State private var draftBeforeSpeech = ""
     @FocusState private var inputFocused: Bool
     @AppStorage("glassEffects") private var glass = true
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                ChatView(dismissKeyboard: { inputFocused = false })
+                ChatView(inputFocused: inputFocused, dismissKeyboard: { inputFocused = false })
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 composer
             }
@@ -54,6 +56,34 @@ struct RootView: View {
                 .sheet(isPresented: $settings) { SettingsView() }
                 .toolbar(inputFocused || !glass ? .hidden : .visible, for: .tabBar)
         }
+        .sheet(isPresented: $actionsExpanded, onDismiss: {
+            guard cameraRequested else { return }
+            cameraRequested = false
+            cameraPresented = true
+        }) {
+            AttachmentPickerRow {
+                inputFocused = false
+                cameraRequested = true
+                actionsExpanded = false
+            }
+            .presentationDetents([.fraction(0.5)])
+            .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(isPresented: $cameraPresented) {
+            CameraCaptureView(onImage: { image in
+                cameraPresented = false
+                guard let data = image.jpegData(compressionQuality: 0.9) else {
+                    store.notice = "照片保存失败，请重试。"
+                    return
+                }
+                let url = URL.cachesDirectory.appending(path: "capture-\(UUID().uuidString).jpg")
+                defer { try? FileManager.default.removeItem(at: url) }
+                do {
+                    try data.write(to: url)
+                    store.importFiles([url])
+                } catch { store.notice = error.localizedDescription }
+            }, onCancel: { cameraPresented = false })
+        }
         .task(id: "\(store.connection?.endpoint ?? "")|\(phase)|\(nav.selected)") {
             guard phase == .active, nav.selected == "chat", store.connection != nil else { return }
             await store.history()
@@ -71,6 +101,24 @@ struct RootView: View {
         .onDisappear { inputFocused = false; nav.keyboardVisible = false; speech.stop() }
     }
     private var composer: some View {
+        ConversationComposer(input: store.composer, speech: speech,
+                             actionsExpanded: $actionsExpanded, settings: $settings,
+                             draftBeforeSpeech: $draftBeforeSpeech, inputFocused: $inputFocused)
+    }
+}
+
+// Keystrokes publish only to the composer, not every historical message view.
+private struct ConversationComposer: View {
+    @EnvironmentObject private var store: Store
+    @ObservedObject var input: ComposerState
+    @ObservedObject var speech: SpeechInput
+    @Binding var actionsExpanded: Bool
+    @Binding var settings: Bool
+    @Binding var draftBeforeSpeech: String
+    var inputFocused: FocusState<Bool>.Binding
+    private var canInterrupt: Bool { store.busy && store.activeScene == store.selected && store.streamID != nil }
+
+    var body: some View {
         return VStack(spacing: 8) {
             if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(.red).padding(.horizontal).accessibilityAddTraits(.updatesFrequently) }
             AdaptiveGlassContainer(spacing: 12) {
@@ -82,37 +130,39 @@ struct RootView: View {
                     Group {
                         if speech.active {
                             VoiceInputBar(speech: speech, cancel: {
-                                speech.stop(); store.draft = draftBeforeSpeech
+                                speech.stop(); input.draft = draftBeforeSpeech
                             })
                         } else {
                             HStack(alignment: .center, spacing: 8) {
                                 Button { withAnimation { actionsExpanded.toggle() } } label: { Image(systemName: actionsExpanded ? "xmark" : "plus").font(.system(size: 21)).frame(width: 40, height: 44) }.accessibilityLabel(actionsExpanded ? "收起资源库" : "展开资源库")
-                                TextField("说点什么…", text: $store.draft, axis: .vertical)
-                                    .focused($inputFocused).lineLimit(1...6).disabled(speech.active).font(.system(size: 16)).padding(.vertical, 10).padding(.leading, 18).accessibilityLabel("消息")
+                                TextField("说点什么…", text: $input.draft, axis: .vertical)
+                                    .focused(inputFocused).lineLimit(1...6).disabled(speech.active).font(.system(size: 16)).padding(.vertical, 10).accessibilityLabel("消息")
                                 Button {
-                                    inputFocused = false
+                                    inputFocused.wrappedValue = false
                                     if speech.active { speech.finish() }
                                     else {
-                                        let original = store.draft
+                                        let original = input.draft
                                         draftBeforeSpeech = original
-                                        Task { await speech.start(update: { text in store.draft = original + (original.isEmpty ? "" : " ") + text },failure: { store.notice = $0 }) }
+                                        Task { await speech.start(update: { text in input.draft = original + (original.isEmpty ? "" : " ") + text },failure: { store.notice = $0 }) }
                                     }
                                 } label: {
                                     Image(systemName:speech.active ? "stop.circle.fill" : "mic").font(.system(size:20)).frame(width:40,height:44)
                                         .foregroundStyle(speech.active ? Color.red : ClientTheme.secondary)
                                 }.accessibilityLabel(speech.active ? "停止语音输入" : "语音输入").disabled(store.busy)
-                                if store.busy || store.connection == nil || !store.draft.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || !store.attachments.isEmpty {
+                                if canInterrupt && (!input.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !store.attachments.isEmpty) {
+                                    Button("排队") { store.send() }.font(.caption).accessibilityLabel("加入队列")
+                                }
+                                if store.busy || store.connection == nil || !input.draft.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || !store.attachments.isEmpty {
                                 Button {
-                                    inputFocused = false
-                                    if store.connection == nil { settings = true }
-                                    else if store.busy && store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.attachments.isEmpty { Task { await store.stop() } }
-                                    else { store.send() }
+                                    if store.connection == nil { inputFocused.wrappedValue = false; settings = true }
+                                    else if store.busy && input.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.attachments.isEmpty { Task { await store.stop() } }
+                                    else { store.send(interrupt: true) }
                                 } label: {
-                                    Image(systemName: store.busy && store.draft.isEmpty && store.attachments.isEmpty ? "stop.fill" : store.connection == nil ? "link" : "arrow.up")
+                                    Image(systemName: store.busy && input.draft.isEmpty && store.attachments.isEmpty ? "stop.fill" : store.connection == nil ? "link" : "arrow.up")
                                         .font(.system(size: 18, weight: .semibold)).frame(width: 36, height: 36)
                                         .foregroundStyle(ClientTheme.buttonText).background(ClientTheme.accent, in: Circle())
-                                }.accessibilityLabel(store.busy ? "停止生成" : store.connection == nil ? "连接 Being" : "发送")
-                                    .disabled(speech.active || (store.connection != nil && !store.busy && store.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.attachments.isEmpty))
+                                }.accessibilityLabel(store.connection == nil ? "连接 Being" : store.busy && input.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.attachments.isEmpty ? "停止生成" : store.busy ? (canInterrupt ? "立即发送" : "加入队列") : "发送")
+                                    .disabled(speech.active || (store.connection != nil && !store.busy && input.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && store.attachments.isEmpty))
                                     .frame(width: 44, height: 44)
                                 }
                             }.padding(.trailing, 6)
@@ -123,12 +173,7 @@ struct RootView: View {
                 .beingSurface(radius: 24)
                 .padding(.horizontal, 16)
             }
-        }.padding(.top, 12).padding(.bottom, inputFocused ? 8 : 10)
-            .sheet(isPresented: $actionsExpanded) {
-                AttachmentPickerRow()
-                    .presentationDetents([.fraction(0.5)])
-                    .presentationDragIndicator(.visible)
-            }
+        }.padding(.top, 12).padding(.bottom, inputFocused.wrappedValue ? 8 : 10)
     }
 }
 struct VoiceInputBar: View {
@@ -170,6 +215,7 @@ struct VoiceInputBar: View {
     }
 }
 struct ChatView: View {
+    var inputFocused = false
     var dismissKeyboard: () -> Void = {}
     @State private var showConnection = false
     @State private var nearBottom = true
@@ -178,6 +224,8 @@ struct ChatView: View {
     @State private var bottomRequest = 0
     @State private var legacyScrollMetrics = LegacyChatScrollMetrics()
     @State private var legacyViewportHeight: CGFloat = 0
+    @State private var replyFillsViewport = false
+    @State private var replyAnchored = false
     @State private var showIndex = false
     @State private var indexSearch = ""
     @State private var jumpID: UUID?
@@ -256,11 +304,19 @@ struct ChatView: View {
                                     }
                                     if !isUser { Spacer(minLength: 24) }
                                 }
+                                if isUser {
+                                    let running = store.busy && store.outbox.contains {
+                                        $0.id == store.activeSendID && $0.userID == message.id && $0.endpoint == store.connection?.endpoint
+                                    }
+                                    if running || message.process?.isEmpty == false {
+                                        ChatRunView(process: message.process ?? "", activity: store.activity, isActive: running)
+                                    }
+                                }
                             }
                             }.id(message.id)
-                        }
-                        if store.busy && store.activeScene == store.selected && !store.activity.isEmpty && store.activity != "正在回复" {
-                            ThinkingIndicator(activity: store.activity)
+                                .modifier(StreamReplyGeometry(tracked: message.id == store.streamingReplyID &&
+                                    index > (messages.lastIndex(where: { $0.role == "user" }) ?? -1),
+                                    viewportHeight: legacyViewportHeight, fillsViewport: $replyFillsViewport))
                         }
                         if store.historyLoading { ProgressView() }
                         Color.clear.frame(height: 1).id("bottom")
@@ -279,7 +335,41 @@ struct ChatView: View {
                         }
                     }.frame(maxWidth: 520, alignment: .leading).padding(.horizontal, 28).padding(.bottom, 20).frame(maxWidth: .infinity)
                 }
-            }.scrollDismissesKeyboard(.interactively)
+            }.accessibilityIdentifier("chatMessageList")
+                .scrollDismissesKeyboard(.interactively)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { legacyViewportHeight = $0 }
+                .onChange(of: inputFocused) { focused in
+                    guard focused else { return }
+                    // Starting to compose explicitly returns to the latest turn,
+                    // even when the user was reading older messages.
+                    replyAnchored = false
+                    replyFillsViewport = false
+                    userScrolling = false
+                    followLatest = true
+                    bottomRequest += 1
+                }
+                .onChange(of: legacyViewportHeight) { _ in
+                    // Focus arrives before the keyboard finishes resizing the
+                    // viewport. Also keep the tail visible as the draft grows.
+                    if inputFocused, followLatest, !userScrolling { bottomRequest += 1 }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+                    // UIKit can finish its inset adjustment after SwiftUI's
+                    // geometry update, especially on iOS 16.
+                    if inputFocused, followLatest, !userScrolling { bottomRequest += 1 }
+                }
+                .onChange(of: replyFillsViewport) { full in
+                    guard full, !inputFocused, followLatest, !userScrolling, let id = store.streamingReplyID else { return }
+                    // Like Town-Client, keep the beginning of a long reply in
+                    // view once it fills the viewport instead of chasing tokens.
+                    replyAnchored = true; followLatest = false
+                    proxy.scrollTo(id, anchor: .top)
+                }
+                .onChange(of: userScrolling) { scrolling in if scrolling { replyAnchored = false } }
+                .onChange(of: store.streamingReplyID) { id in
+                    replyFillsViewport = false
+                    if id != nil, replyAnchored { replyAnchored = false; followLatest = true; bottomRequest += 1 }
+                }
                 .simultaneousGesture(TapGesture().onEnded { dismissKeyboard() })
                 .modifier(ChatScrollBehavior(nearBottom: $nearBottom, followLatest: $followLatest,
                                              userScrolling: $userScrolling, bottomRequest: $bottomRequest,
@@ -296,14 +386,14 @@ struct ChatView: View {
                     Task { @MainActor in await Task.yield(); proxy.scrollTo(id, anchor: .top); jumpID = nil }
                 }
                 .onChange(of: allMessages.count) { _ in if followLatest { bottomRequest += 1 } }
-                .onChange(of: store.selected) { _ in followLatest = true; bottomRequest += 1 }
+                .onChange(of: store.selected) { _ in replyAnchored = false; followLatest = true; bottomRequest += 1 }
                 .onChange(of: store.showAllScenes) { _ in followLatest = true; bottomRequest += 1 }
                 .onChange(of: store.submittedMessageID) { id in
-                    if id != nil { followLatest = true; bottomRequest += 1 }
+                    if id != nil { replyAnchored = false; replyFillsViewport = false; followLatest = true; bottomRequest += 1 }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !nearBottom && !messages.isEmpty {
-                        Button { userScrolling = false; followLatest = true; bottomRequest += 1 } label: {
+                        Button { replyAnchored = false; userScrolling = false; followLatest = true; bottomRequest += 1 } label: {
                             Image(systemName: "arrow.down").font(.system(size: 18, weight: .semibold)).frame(width: 44, height: 44)
                         }.beingButton().beingCircleButtonShape().accessibilityLabel("回到底部").padding(16)
                     }
@@ -322,9 +412,9 @@ private struct DeliveryStatusView: View {
     @EnvironmentObject private var store: Store
     private var entry: PendingSend? { store.outbox.first { $0.userID == message.id } }
     var body: some View {
-        if let entry {
+        if let entry, let label = DeliveryRules.bubbleStatus(entry) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(status(entry)).font(.caption).foregroundStyle(foreground.opacity(0.82)).accessibilityAddTraits(.updatesFrequently)
+                Text(label).font(.caption).foregroundStyle(foreground.opacity(0.82)).accessibilityAddTraits(.updatesFrequently)
                 if let error = entry.error, !error.isEmpty { Text(error).font(.caption2).foregroundStyle(foreground.opacity(0.76)).lineLimit(3) }
                 HStack(spacing: 20) {
                     if entry.phase == "failed" { Button("重试") { store.retryQueued(entry.id) } }
@@ -337,18 +427,7 @@ private struct DeliveryStatusView: View {
             }
         }
     }
-    private func status(_ entry: PendingSend) -> String {
-        switch entry.phase {
-        case "queued": return entry.files.isEmpty ? "等待发送" : "等待上传附件"
-        case "preparing": return entry.files.first(where: { $0.attachmentID == nil }) == nil ? "正在准备附件" : "正在上传附件"
-        case "sending": return "正在发送"
-        case "waiting": return "服务端排队中"
-        case "failed": return "发送失败"
-        case "unknown": return "发送结果待确认"
-        case "stopped": return "已停止"
-        default: return entry.phase
-        }
-    }
+
 }
 func chatTime(_ value:String) -> String {
     let fractional=ISO8601DateFormatter(); fractional.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
@@ -419,26 +498,6 @@ struct SettingsView: View {
         }
     }
 }
-
-private struct ThinkingIndicator: View {
-    let activity: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Being").font(.caption).foregroundStyle(ClientTheme.secondary)
-            TimelineView(.animation(minimumInterval: 0.2)) { context in
-                HStack(spacing: 6) {
-                    ForEach(0..<3) { index in
-                        Circle().fill(ClientTheme.secondary)
-                            .frame(width: 6, height: 6)
-                            .opacity(Int(context.date.timeIntervalSinceReferenceDate * 3) % 3 == index ? 1 : 0.3)
-                    }
-                    if activity != "思考中" { Text(activity).font(.caption).foregroundStyle(ClientTheme.secondary) }
-                }.padding(.vertical, 10)
-            }
-        }.accessibilityElement(children: .ignore).accessibilityLabel(activity)
-    }
-}
-
 
 struct SBSControlView: View {
     @EnvironmentObject private var store: Store

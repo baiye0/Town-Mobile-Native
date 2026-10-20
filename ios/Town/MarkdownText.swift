@@ -5,7 +5,7 @@ struct MarkdownText: View {
     var previewMarkdownCode = true
     var foreground:Color? = nil
     var fillsWidth = true
-    private func inline(_ text:String) -> Text { Text((try? AttributedString(markdown:text,options:.init(interpretedSyntax:.inlineOnlyPreservingWhitespace))) ?? AttributedString(text)) }
+    private func inline(_ text:String) -> Text { Text(MarkdownRenderCache.inline(text)) }
     var body: some View {
         VStack(alignment:.leading,spacing:8) {
             ForEach(Array(MarkdownRenderCache.blocks(text).enumerated()),id:\.offset) { _,block in
@@ -64,6 +64,19 @@ struct NativeCodeBlock: View {
     private static let cache: NSCache<NSString, Entry> = {
         let cache = NSCache<NSString, Entry>(); cache.countLimit = 200; cache.totalCostLimit = 2_000_000; return cache
     }()
+    private final class InlineEntry {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+    private static let inlineCache: NSCache<NSString, InlineEntry> = {
+        let cache = NSCache<NSString, InlineEntry>(); cache.countLimit = 1000; cache.totalCostLimit = 2_000_000; return cache
+    }()
+    static func inline(_ text: String) -> AttributedString {
+        if let cached = inlineCache.object(forKey: text as NSString) { return cached.value }
+        let value = (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+        inlineCache.setObject(InlineEntry(value), forKey: text as NSString, cost: text.utf8.count * 2)
+        return value
+    }
     static func blocks(_ text: String) -> [MarkdownBlock] {
         if let entry = cache.object(forKey: text as NSString) { return entry.blocks }
         let blocks = MarkdownBlocks.parse(text)

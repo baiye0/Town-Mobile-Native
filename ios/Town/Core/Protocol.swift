@@ -36,7 +36,17 @@ public struct Connection: Codable, Equatable, Sendable {
         return c.url!
     }
 }
-public struct SSEEvent: Equatable, Sendable { public let name: String; public let data: String }
+public struct SSEEvent: Equatable, Sendable {
+    public let name: String
+    public let data: String
+
+    // Like Town-Client, ignore non-JSON keepalives/unknown payloads without
+    // abandoning a healthy stream and falling back to a final history snapshot.
+    var payload: [String: Any]? {
+        guard let bytes = data.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any]
+    }
+}
 public struct SSEParser {
     private var name = "message"
     private var data: [String] = []
@@ -56,7 +66,7 @@ public struct SSEParser {
         return nil
     }
 }
-struct Message: Codable, Identifiable { var id = UUID(); var role: String; var text: String; var sceneID: String? = nil; var sequence: Int? = nil; var kind: String? = nil; var timestamp: String? = nil; var sceneLabel: String? = nil; var files: [PendingAttachment]? = nil; var process: String? = nil; var localBaseline: Int? = nil }
+struct Message: Codable, Identifiable, Equatable { var id = UUID(); var role: String; var text: String; var sceneID: String? = nil; var sequence: Int? = nil; var kind: String? = nil; var timestamp: String? = nil; var sceneLabel: String? = nil; var files: [PendingAttachment]? = nil; var process: String? = nil; var localBaseline: Int? = nil; var replyTo: UUID? = nil; var localAfter: UUID? = nil; var streaming: Bool? = nil; var persistedText: String? = nil }
 struct Conversation: Codable, Identifiable {
     var id: String = "mobile-" + UUID().uuidString
     var endpoint: String; var title = "新对话"; var messages: [Message] = []; var updated = Date()

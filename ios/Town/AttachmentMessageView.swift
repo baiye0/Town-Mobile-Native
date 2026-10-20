@@ -75,7 +75,9 @@ struct AttachmentMessageView: View {
                 }
             }
             if loadingDetails && files.isEmpty && !references.isEmpty { ProgressView("正在加载附件").font(.caption).tint(foreground) }
-            if let process = message.process, !process.isEmpty { DisclosureGroup("思考与工具过程") { Text(process).font(.caption).textSelection(.enabled) }.font(.caption) }
+            // Older saved replies can still carry process details. New runs are
+            // displayed independently beneath their initiating user turn.
+            if message.role != "user", let process = message.process, !process.isEmpty { DisclosureGroup("思考与工具过程") { Text(process).font(.caption).textSelection(.enabled) }.font(.caption) }
             if working { ProgressView() }
             if let error { Text(error).font(.caption); Button("重新读取附件") { Task { await load() } }.font(.caption) }
         }.foregroundStyle(foreground)
@@ -113,13 +115,17 @@ struct AttachmentMessageView: View {
         return thumbnail(URL.documentsDirectory.appending(path: "attachments/" + local.path))
     }
     private func thumbnail(_ url: URL) -> UIImage? {
+        if let cached = AttachmentThumbnailCache.images.object(forKey: url as NSURL) { return cached }
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: 1024
               ] as CFDictionary) else { return nil }
-        return UIImage(cgImage: image)
+        let thumbnail = UIImage(cgImage: image)
+        AttachmentThumbnailCache.images.setObject(thumbnail, forKey: url as NSURL,
+                                                 cost: image.bytesPerRow * image.height)
+        return thumbnail
     }
     private func load() async {
         loadingDetails = true
@@ -189,4 +195,15 @@ struct AttachmentMessageView: View {
             }
         } catch is CancellationError {} catch { self.error = error.localizedDescription }
     }
+}
+
+// Imported attachment paths are immutable UUIDs. Reuse their bounded previews
+// while new tokens arrive instead of decoding images during each body update.
+@MainActor private enum AttachmentThumbnailCache {
+    static let images: NSCache<NSURL, UIImage> = {
+        let cache = NSCache<NSURL, UIImage>()
+        cache.countLimit = 40
+        cache.totalCostLimit = 32 * 1024 * 1024
+        return cache
+    }()
 }

@@ -151,21 +151,14 @@ struct AttachmentPickerRow: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var picker = false
-    @State private var camera = false
+    let onCamera: () -> Void
     @State private var photo: PhotosPickerItem?
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("资源库").font(.title3.weight(.semibold))
             if store.connection != nil {
                 HStack(spacing: 12) {
-                    #if targetEnvironment(simulator)
-                    // UIImagePickerController's camera fallback renders as a blank
-                    // half-sheet in the iOS simulator. Use the same system photo
-                    // picker there so the action remains testable and usable.
-                    PhotosPicker(selection: $photo, matching: .images) { resourceCard("camera", "拍照") }
-                    #else
-                    Button { camera = true } label: { resourceCard("camera", "拍照") }
-                    #endif
+                    Button(action: onCamera) { resourceCard("camera", "拍照") }
                     PhotosPicker(selection: $photo, matching: .images) { resourceCard("photo", "照片") }
                     Button { picker = true } label: { resourceCard("doc", "文件") }
                 }
@@ -201,11 +194,6 @@ struct AttachmentPickerRow: View {
         .padding(.top, 8)
         .padding(.bottom, 20)
             .fileImporter(isPresented: $picker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in switch result { case .success(let urls): store.importFiles(urls); dismiss(); case .failure(let error): store.notice = error.localizedDescription } }
-            .fullScreenCover(isPresented: $camera) { CameraPicker { image in
-                guard let data = image.jpegData(compressionQuality: 0.9) else { return }
-                let url = URL.cachesDirectory.appending(path: "capture-\(UUID().uuidString).jpg")
-                do { try data.write(to: url); store.importFiles([url]); dismiss() } catch { store.notice = error.localizedDescription }
-            } }
             .onChange(of: photo) { item in
                 guard let item else { return }
                 Task {
@@ -227,25 +215,48 @@ struct AttachmentPickerRow: View {
     }
 }
 
+// Present from the conversation, outside the resource sheet's detent environment.
+// The UIKit camera manages its own control insets; its host must fill the screen.
+struct CameraCaptureView: View {
+    let onImage: (UIImage) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                CameraPicker(onImage: onImage, onCancel: onCancel)
+            } else {
+                VStack(spacing: 20) {
+                    Text("当前设备无法使用相机").foregroundStyle(.white)
+                    Button("取消", action: onCancel).buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .ignoresSafeArea()
+        .accessibilityIdentifier("cameraCapture")
+    }
+}
+
 private struct CameraPicker: UIViewControllerRepresentable {
     let onImage: (UIImage) -> Void
-    @Environment(\.dismiss) private var dismiss
+    let onCancel: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        picker.sourceType = .camera
         picker.modalPresentationStyle = .fullScreen
         picker.allowsEditing = false
         picker.view.backgroundColor = .black
-        if picker.sourceType == .camera { picker.cameraCaptureMode = .photo }
+        picker.cameraCaptureMode = .photo
         picker.delegate = context.coordinator
         return picker
     }
     func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
     final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
         let parent: CameraPicker; init(_ parent: CameraPicker) { self.parent = parent }
-        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) { if let image = info[.originalImage] as? UIImage { parent.onImage(image) }; parent.dismiss() }
-        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.dismiss() }
+        func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) { if let image = info[.originalImage] as? UIImage { parent.onImage(image) } else { parent.onCancel() } }
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { parent.onCancel() }
     }
 }
 
