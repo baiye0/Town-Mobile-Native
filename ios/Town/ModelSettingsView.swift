@@ -1,7 +1,7 @@
 import SwiftUI
 struct ModelChoice: Identifiable { let id: String; let name: String }
 struct ModelSettingsView: View {
-    @Environment(Store.self) private var store
+    @EnvironmentObject private var store: Store
     @State private var routes: [ModelChoice] = []
     @State private var models: [ModelChoice] = []
     @State private var provider = ""
@@ -13,7 +13,7 @@ struct ModelSettingsView: View {
     @State private var result: String?
     var body: some View {
         Form {
-            if store.connection == nil { ContentUnavailableView("请先连接 Being 对话。", systemImage: "link", description: Text("选择当前 Being 使用的模型")) }
+            if store.connection == nil { BeingEmptyState("请先连接 Being 对话。", systemImage: "link", description: Text("选择当前 Being 使用的模型")) }
             else {
                 Section("模型") {
                     if routes.isEmpty { TextField("服务商 / 线路 ID", text: $provider).textInputAutocapitalization(.never) }

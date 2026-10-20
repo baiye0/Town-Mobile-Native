@@ -17,8 +17,8 @@ iOS 使用 SwiftUI、URLSession/SSE、Keychain；Android 使用 Compose、OkHttp
 
 SwiftUI HistoryStack 保存页面路径与前进历史，新导航清除前进历史；左右边缘分别返回/前进。对话根页面左边缘负责侧栏，避免和详情返回冲突。Android 使用 NavigationModel 和局部详情历史，支持边缘手势及系统返回。
 
-iOS 26 TabView 和 GlassEffectContainer 使用系统玻璃效果。界面只显示底部图标，保留可访问性名称。颜色来自桌面 app/styles.css，功能描述来自 Town definitions。Logo 复用 beings-town-mobile 的最终移动图标。
+iOS 最低支持 16.0（状态管理使用 ObservableObject / @Published，视图使用 StateObject / EnvironmentObject）。iOS 26 的玻璃表面、按钮、工具栏和 GlassEffectContainer 均通过系统版本判断启用，旧系统回退为普通界面；iOS 16–17 使用 tabItem/tag 导航，iOS 18 及以上保留 Tab API。iOS 16–17 的聊天滚动使用内容几何与拖拽状态，iOS 18 及以上使用系统滚动阶段 API。空状态页面、图标按钮、图片预览背景与麦克风权限均有旧系统实现。构建需要 Xcode 26 或更新版本。界面只显示底部图标，保留可访问性名称。颜色来自桌面 app/styles.css，功能描述来自 Town definitions。Logo 复用 beings-town-mobile 的最终移动图标。
 
 ## 边界
 
-前台实时连接不等于 APNs/FCM。无后台常驻、系统推送、实时语音、附件上传、运行中流恢复或完整 Markdown 扩展。Town 已有凭据高级导入、复杂消息筛选等桌面细节仍需后续对齐。Portal/Grove/桌面 Kit 与 App 管理按要求排除。
+前台实时连接不等于 APNs/FCM。无后台常驻、APNs/FCM 推送、实时语音或完整 Markdown 扩展。现已加入持久化发送队列、运行中流恢复、附件上传解析、本地通知、已有凭据验证导入与消息筛选。平台预览与原生交互界面仍有边界，见 MOBILE-PARITY.md。Portal/Grove/Kit 与 App 管理按要求排除。

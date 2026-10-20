@@ -19,6 +19,7 @@ import okhttp3.HttpUrl
 import org.json.JSONObject
 
 @Composable fun CatalogScreen(category:String,m:TownModel,social:SocialModel,nav:NavigationModel){
+    var contactRecipient by remember{mutableStateOf<String?>(null)}
     var records by remember{mutableStateOf<List<JSONObject>>(emptyList())};var selected by remember{mutableStateOf<JSONObject?>(null)}
     var search by rememberSaveable{mutableStateOf("")};var domain by rememberSaveable{mutableStateOf("")};var tag by rememberSaveable{mutableStateOf("")};var lifecycle by rememberSaveable{mutableStateOf("")};var kind by rememberSaveable{mutableStateOf("")}
     var mine by rememberSaveable{mutableStateOf(false)};var expired by rememberSaveable{mutableStateOf(false)};var filters by rememberSaveable{mutableStateOf(false)};var page by rememberSaveable{mutableIntStateOf(0)};var revision by remember{mutableIntStateOf(0)}
@@ -36,6 +37,7 @@ import org.json.JSONObject
             val next=data.rows(key);records=if(page==0)next else (records+next).distinctBy{it.field("id","town_id")};more=next.size==24&&category !in listOf("home","contacts")
         }catch(e:CancellationException){throw e}catch(_:Exception){error="加载失败，请检查网络。私有卷轴需要有效的连接 Being Town。"}finally{loading=false}
     }
+    contactRecipient?.let{recipient->SocialComposeSheet("mail","","",null,false,m,social,nav,onDismiss={contactRecipient=null},onSent={contactRecipient=null},initialRecipient=recipient)}
     var forwardRecord by remember { mutableStateOf<JSONObject?>(null) }
     BackHandler(selected!=null||declaration){forwardRecord=selected;selected=null;declaration=false}
     if(declaration){ContactDeclarationScreen(m,social,nav){declaration=false};return}
@@ -57,7 +59,7 @@ import org.json.JSONObject
         if(filters&&category=="announcements")item{Row{Checkbox(expired,{expired=it;page=0});Text("全部历史",Modifier.padding(top=12.dp))};listOf("" to "全部","update" to "版本更新","rule" to "小镇规约","event" to "活动","general" to "日常公告").chunked(3).forEach{row->Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){row.forEach{(v,t)->FilterChip(selected=kind==v,onClick={kind=v;page=0},label={Text(t)})}}}}
         if(category=="contacts")item{TextButton(onClick={declaration=true}){Text("登记我的人类伙伴")}}
         items(records.filter{category=="seeds"||search.isEmpty()||it.toString().contains(search,true)}){record->
-            if(category=="contacts")Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text(record.field("human_name","display_name"),fontWeight=FontWeight.Bold);Text(record.field("display_name","display"),fontSize=14.sp);Text(record.field("note"),fontSize=14.sp);SelectionContainer{Text(record.field("town_id"),fontSize=12.sp,color=MaterialTheme.colorScheme.outline)};HorizontalDivider()}
+            if(category=="contacts")Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text(record.field("human_name","display_name"),fontWeight=FontWeight.Bold);Text(record.field("display_name","display"),fontSize=14.sp);Text(record.field("note"),fontSize=14.sp);SelectionContainer{Text(record.field("town_id"),fontSize=12.sp,color=MaterialTheme.colorScheme.outline)};TextButton(onClick={contactRecipient=record.field("town_id")},enabled=social.identity!=null&&record.field("town_id").isNotEmpty()){Text("写私信")};HorizontalDivider()}
             else ListItem(headlineContent={Text(record.field("title","name","service","action"),fontWeight=FontWeight.SemiBold)},supportingContent={Column{Text(record.field("display_name","display","date"),fontSize=11.sp);Text(record.field("brief_excerpt","description","content","change","why"),maxLines=3,lineHeight=23.sp)}},modifier=Modifier.clickable{forwardRecord=null;selected=record})
         }
         error?.let{item{Text(it,color=MaterialTheme.colorScheme.error);TextButton(onClick={revision++}){Text("重试")}}}

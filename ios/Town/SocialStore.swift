@@ -17,12 +17,12 @@ enum TownVault {
 func field(_ record: [String: Any], _ names: String...) -> String {
     for name in names { if let s = record[name] as? String, !s.isEmpty { return s }; if let n = record[name] as? NSNumber { return n.stringValue } }; return ""
 }
-@MainActor @Observable final class SocialStore {
-    var identity = TownVault.load()
-    var status = "尚未配对"
-    var revision = 0
-    var counts: [String: Int] = [:]
-    private var seen: Set<String> = []
+@MainActor final class SocialStore: ObservableObject {
+    @Published var identity = TownVault.load()
+    @Published var status = "尚未配对"
+    @Published var revision = 0
+    @Published var counts: [String: Int] = [:]
+    var seen: Set<String> = []
     private var live: Task<Void, Never>?
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
     func unread(_ destination: Destination) -> Int { counts[destination.rawValue] ?? 0 }
@@ -88,7 +88,7 @@ func field(_ record: [String: Any], _ names: String...) -> String {
                         guard hello else { throw PortalError.invalidResponse }
                         let key = eventType + ":" + field(object, "fireside_id") + ":" + field(object, "id", "seq")
                         let channel = ["dm": "mail", "bonfire": "bonfire", "fireside": "firesides"][eventType]
-                        if let channel, seen.insert(key).inserted { if seen.count > 5000 { seen = [key] }; if field(object, "sender_town_id", "town_id", "being_id") != credential.id { counts[channel, default: 0] += 1 }; revision += 1 }
+                        if let channel, seen.insert(key).inserted { if seen.count > 5000 { seen = [key] }; if field(object, "sender_town_id", "town_id", "being_id") != credential.id { counts[channel, default: 0] += 1; CompletionNotifications.shared.social(channel: channel, title: ["mail":"收到新私信","firesides":"围炉有新消息","bonfire":"篝火有新消息"][channel] ?? "小镇有新消息", body: "打开 Being 查看最新内容") }; revision += 1 }
                     }
                     throw PortalError.invalidResponse
                 } catch { if Task.isCancelled { return }; status = "连接中断，正在重连…"; attempts += 1; try? await Task.sleep(for: .seconds(min(30, 2 * attempts))) }
@@ -100,7 +100,7 @@ func field(_ record: [String: Any], _ names: String...) -> String {
 extension Store {
     func pairingCode() async throws -> String {
         guard !busy, let c = connection else { throw PortalError.server("请先连接 Being，并等待当前回复结束。") }
-        busy = true; defer { busy = false }
+        busy = true; defer { busy = false; startDelivery() }
         let scene = "town-pair-" + UUID().uuidString
         let prompt = "请帮我完成 Town 配对：请现在执行 POST https://beings.town/api/client/pair（不需要任何鉴权 header），把返回 JSON 里的 code 字段（6 位大写字母和数字）原样回复给我。只回复这 6 位 code 本身，不要解释、不要多余文字。"
         var req = request(c, "/api/chat/stream", method: "POST", body: ["message": prompt, "scene_id": scene, "session_id": scene, "scene_meta": ["client": "beings-ios/0.2", "scene_label": "Town 配对"]])

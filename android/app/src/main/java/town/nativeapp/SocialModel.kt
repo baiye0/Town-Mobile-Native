@@ -53,6 +53,20 @@ class SocialModel(app: Application) : AndroidViewModel(app) {
         val value = TownIdentity(token, returned.ifEmpty { id }, result.field("display_name", "speaker_name", "display"))
         vault.save(JSONObject().put("token", value.token).put("id", value.id).put("name", value.name).toString()); identity = value; unread = emptyMap(); seen.clear(); revision++; startLive()
     }
+    suspend fun importIdentity(rawID:String,token:String){
+        val id=TownContracts.identity(rawID);TownContracts.validatePair(id,if(id.startsWith("t_"))id else null,if(id.startsWith("t_"))null else id,token)
+        val value=withContext(Dispatchers.IO){
+            val url=HttpUrl.Builder().scheme("https").host("beings.town").addPathSegments("api/client/stream").addQueryParameter("token",token).build()
+            client.newBuilder().callTimeout(20,TimeUnit.SECONDS).build().newCall(Request.Builder().url(url).header("Accept","text/event-stream").build()).execute().use{r->
+                check(r.code==200){"凭据验证失败"};val source=r.body!!.source();val parser=SSEParser();var count=0
+                while(true){currentCoroutineContext().ensureActive();val line=source.readUtf8Line() ?: break;count+=line.length;check(count<=65536);val event=parser.line(line) ?: continue;if(event.name!="hello")continue;val data=JSONObject(event.data);val actual=data.field("town_id","being_id")
+                    check(!data.optBoolean("anonymous",true)&&data.optString("token_kind")=="client"&&(actual==id||!id.startsWith("t_")&&data.optString("being_id")==id)){"凭据与填写的小镇身份不一致"}
+                    return@withContext TownIdentity(token,actual,data.field("display_name","display"))
+                };error("未收到小镇身份确认")
+            }
+        }
+        currentCoroutineContext().ensureActive();vault.save(JSONObject().put("token",value.token).put("id",value.id).put("name",value.name).toString());stopLive();identity=value;unread=emptyMap();seen.clear();revision++;startLive()
+    }
     fun unpair() { stopLive(); vault.save(null); identity = null; unread = emptyMap(); seen.clear(); status = "尚未配对"; revision++ }
     fun acknowledge(kind: String) { unread = unread + (kind to 0) }
     fun stopLive() { liveCall?.cancel(); liveJob?.cancel(); liveJob = null; liveCall = null }
@@ -85,7 +99,7 @@ class SocialModel(app: Application) : AndroidViewModel(app) {
                                 withContext(Dispatchers.Main) {
                                     if (identity == credential && seen.add(key)) {
                                         if (seen.size > 5000) { seen.clear(); seen.add(key) }
-                                        if (data.field("sender_town_id","town_id","being_id") != credential.id) unread = unread + (channel to ((unread[channel] ?: 0) + 1))
+                                        if (data.field("sender_town_id","town_id","being_id") != credential.id) { unread = unread + (channel to ((unread[channel] ?: 0) + 1)); CompletionNotifications.social(getApplication(), channel, mapOf("mail" to "收到新私信", "firesides" to "围炉有新消息", "bonfire" to "篝火有新消息")[channel] ?: "小镇有新消息") }
                                         revision++
                                     }
                                 }

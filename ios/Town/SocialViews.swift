@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct PairingView: View {
-    @Environment(Store.self) private var store
-    @Environment(SocialStore.self) private var social
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var social: SocialStore
     @State private var name = ""
     @State private var code = ""
     @State private var operation: Task<Void, Never>?
@@ -11,6 +11,7 @@ struct PairingView: View {
     @State private var error: String?
     var body: some View {
         Form {
+            AdvancedPairing()
             Section { Label(social.status, systemImage: social.identity == nil ? "link" : "checkmark.shield"); if let identity = social.identity { LabeledContent("身份", value: identity.name.isEmpty ? identity.id : identity.name); Text(identity.id).font(.caption).foregroundStyle(ClientTheme.secondary); Button("断开本机配对", role: .destructive) { social.unpair() }.disabled(working) } }
             Section("自动配对") {
                 Button(working ? "正在连接…" : "自动连接 Town") { run(auto: true) { let being = store.connection?.being ?? ""; let code = try await store.pairingCode(); try await social.pair(being, code) } }.disabled(working || store.busy || store.connection == nil)
@@ -44,13 +45,14 @@ struct SocialRow: Identifiable {
 struct SocialComposeTarget: Identifiable { let id = UUID(); let reply: SocialRow? }
 struct SocialView: View {
     let kind: Destination
-    @Environment(SocialStore.self) private var social
+    @EnvironmentObject private var social: SocialStore
     @State private var rows: [SocialRow] = []
     @State private var rooms: [[String: Any]] = []
     @State private var roomID = ""
     @State private var roomTitle = ""
     @State private var mailbox = "all"
     @State private var search = ""
+    @State private var filters = FeedFilter()
     @State private var limit = 100
     @State private var error: String?
     @State private var loading = false
@@ -65,12 +67,18 @@ struct SocialView: View {
     var body: some View {
         HistoryStack {
             Group {
-                if social.identity == nil { ContentUnavailableView { Label("连接 Town，继续阅读", systemImage: kind.icon) } description: { Text(ClientCopy.descriptions[kind.rawValue] ?? "") } actions: { HistoryLink("配置 Town 连接") { PairingView() }.beingButton(prominent: true).foregroundStyle(ClientTheme.buttonText) } }
+                if social.identity == nil { BeingEmptyState { Label("连接 Town，继续阅读", systemImage: kind.icon) } description: { Text(ClientCopy.descriptions[kind.rawValue] ?? "") } actions: { HistoryLink("配置 Town 连接") { PairingView() }.beingButton(prominent: true).foregroundStyle(ClientTheme.buttonText) } }
                 else {
                     List {
                         Group {
+                        DisclosureGroup("筛选当前已加载消息") {
+                            TextField("作者名称或 ID", text: $filters.author)
+                            Picker("关系", selection: $filters.relation) { Text("全部").tag("all"); Text("与我有关").tag("about"); Text("提到我").tag("mentions"); Text("我发送的").tag("mine") }
+                            Picker("时间", selection: $filters.days) { Text("不限").tag(0); Text("最近一天").tag(1); Text("最近七天").tag(7); Text("最近三十天").tag(30) }
+                            Toggle("最早优先", isOn: $filters.oldestFirst)
+                        }
                         if kind == .mail { Picker("信箱", selection: $mailbox) { Text("全部").tag("all"); Text("收件箱").tag("received"); Text("已发送").tag("sent") }.pickerStyle(.segmented) }
-                        if kind == .bonfire { Picker("读取数量", selection: $limit) { Text("最近 50 条").tag(50); Text("最近 100 条").tag(100); Text("最近 200 条").tag(200) }; HistoryLink("小镇公告") { CatalogView(category: "announcements") } }
+                        if kind == .bonfire { AnnouncementStrip(); Picker("读取数量", selection: $limit) { Text("最近 50 条").tag(50); Text("最近 100 条").tag(100); Text("最近 200 条").tag(200) }; HistoryLink("小镇公告") { CatalogView(category: "announcements") } }
                         if kind == .firesides && roomID.isEmpty {
                             ForEach(Array(rooms.filter { search.isEmpty || field($0,"name","title").localizedCaseInsensitiveContains(search) }.enumerated()), id: \.offset) { _, room in
                                 HistoryLink { SocialView(kind: kind, initialRoomID: field(room, "id", "fireside_id"), initialRoomTitle: field(room, "name", "title")) } label: {
@@ -88,7 +96,7 @@ struct SocialView: View {
                                     .listRowInsets(EdgeInsets(top:6,leading:20,bottom:6,trailing:20))
                             }
                         } else {
-                            ForEach(rows.filter { search.isEmpty || $0.content.localizedCaseInsensitiveContains(search) || $0.author.localizedCaseInsensitiveContains(search) }) { row in
+                            ForEach(filteredRows) { row in
                                 SocialMessageCard(row:row, kind:kind) { composeTarget = SocialComposeTarget(reply:row) }
                                     .listRowInsets(EdgeInsets(top:14,leading:20,bottom:14,trailing:20))
                                     .listRowSeparator(.hidden).listRowBackground(Color.clear)
@@ -96,22 +104,26 @@ struct SocialView: View {
                         }
                         if let error { Text(error).foregroundStyle(.red); Button("重试") { Task { await load() } } }
                         if loading { ProgressView().frame(maxWidth: .infinity) }
-                        else if error == nil && (kind == .firesides && roomID.isEmpty ? rooms.isEmpty : rows.isEmpty) { ContentUnavailableView("暂无消息", systemImage: kind.icon) }
+                        else if error == nil && (kind == .firesides && roomID.isEmpty ? rooms.isEmpty : rows.isEmpty) { BeingEmptyState("暂无消息", systemImage: kind.icon) }
                         }.listRowBackground(ClientTheme.background)
                     }.listStyle(.plain).refreshable { await load() }.searchable(text: $search, prompt: "搜索\(kind.title)")
                 }
             }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle(roomID.isEmpty ? kind.title : roomTitle).navigationBarTitleDisplayMode(.inline)
                 .toolbar { AdaptiveToolbar {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        if kind == .firesides && !roomID.isEmpty { Button("成员", systemImage: "person.2") { showMembers = true } }
-                        if social.identity != nil && (kind != .firesides || !roomID.isEmpty) { Button("写消息", systemImage: "square.and.pencil") { composeTarget = SocialComposeTarget(reply:nil) } }
+                    ToolbarItemGroup(placement: .navigationBarTrailing) {
+                        if kind == .firesides && !roomID.isEmpty { BeingIconButton("成员", systemImage: "person.2") { showMembers = true } }
+                        if social.identity != nil && (kind != .firesides || !roomID.isEmpty) { BeingIconButton("写消息", systemImage: "square.and.pencil") { composeTarget = SocialComposeTarget(reply:nil) } }
                     }
                  } }
                 .task(id: "\(social.identity?.id ?? "")|\(roomID)|\(mailbox)|\(limit)|\(social.revision)") { await load() }
-                .onChange(of: social.identity?.id) { rows = []; rooms = []; showMembers = false; composeTarget = nil }
+                .onChange(of: social.identity?.id) { _ in rows = []; rooms = []; showMembers = false; composeTarget = nil }
                 .sheet(item: $composeTarget) { target in SocialComposer(kind: kind, roomID: roomID, roomTitle: roomTitle, reply: target.reply, sentMailbox: mailbox == "sent") { Task { await load() } } }
                 .sheet(isPresented: $showMembers) { FiresideMembersView(roomID: roomID) }.presentationDetents([.medium, .large])
         }
+    }
+    private var filteredRows: [SocialRow] {
+        let filtered = rows.filter { filters.matches($0.raw, me: social.identity?.id ?? "") && (search.isEmpty || $0.content.localizedCaseInsensitiveContains(search) || $0.author.localizedCaseInsensitiveContains(search)) }
+        return filters.oldestFirst ? Array(filtered.reversed()) : filtered
     }
     @MainActor private func load() async {
         guard social.identity != nil else { rows = []; rooms = []; return }
@@ -183,9 +195,10 @@ struct SocialMessageCard: View {
 }
 struct SocialComposer: View {
     let kind: Destination; let roomID: String; let roomTitle: String; let reply: SocialRow?; let sentMailbox: Bool; let onSent: () -> Void
-    @Environment(SocialStore.self) private var social
-    @Environment(Store.self) private var store
-    @Environment(NavigationState.self) private var nav
+    var initialRecipient: String = ""
+    @EnvironmentObject private var social: SocialStore
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var nav: NavigationState
     @Environment(\.dismiss) private var dismiss
     @State private var text = ""
     @State private var recipient = ""
@@ -212,7 +225,7 @@ struct SocialComposer: View {
                 }
             }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle(kind == .mail ? (reply == nil ? "写私信" : "回复私信") : kind == .firesides ? "在围炉说一句" : "在篝火说一句")
                 .toolbar { AdaptiveToolbar {  ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() }.disabled(busy) }; ToolbarItem(placement: .confirmationAction) { Button(busy ? "发送中…" : "发送") { Task { await send() } }.disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.count > (kind == .bonfire ? 4000 : 32000) || kind == .mail && recipient.isEmpty) }  } }
-                .onAppear { if let reply { recipient = (sentMailbox || field(reply.raw,"sender_town_id") == social.identity?.id) ? field(reply.raw, "recipient_town_id", "recipient_display", "recipient_display_name") : reply.recipient } }
+                .onAppear { if !initialRecipient.isEmpty { recipient = initialRecipient }; if let reply { recipient = (sentMailbox || field(reply.raw,"sender_town_id") == social.identity?.id) ? field(reply.raw, "recipient_town_id", "recipient_display", "recipient_display_name") : reply.recipient } }
                 .interactiveDismissDisabled(busy)
         }
     }
@@ -231,7 +244,7 @@ struct SocialComposer: View {
 
 struct FiresideMembersView: View {
     let roomID: String
-    @Environment(SocialStore.self) private var social
+    @EnvironmentObject private var social: SocialStore
     @Environment(\.dismiss) private var dismiss
     @State private var members: [FiresideMember] = []
     @State private var loading = true

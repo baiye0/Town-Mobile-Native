@@ -1,17 +1,233 @@
 // !$*UTF8*$!
-{ archiveVersion = 1; classes = {}; objectVersion = 77; objects = {
-A00000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 2600;}; buildConfigurationList = A00000000000000000000002; compatibilityVersion = "Xcode 16.0"; developmentRegion = zh_CN; knownRegions = (en, zh_CN, Base); mainGroup = A00000000000000000000003; productRefGroup = A00000000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000005); };
-A00000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000010, A00000000000000000000011); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
-A00000000000000000000003 = {isa = PBXGroup; children = (A00000000000000000000006, A00000000000000000000004); sourceTree = "<group>";};
-A00000000000000000000004 = {isa = PBXGroup; children = (A00000000000000000000007); name = Products; sourceTree = "<group>";};
-A00000000000000000000005 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000008; buildPhases = (A00000000000000000000009, A00000000000000000000014); buildRules = (); dependencies = (); fileSystemSynchronizedGroups = (A00000000000000000000006); name = Town; productName = Town; productReference = A00000000000000000000007; productType = "com.apple.product-type.application";};
-A00000000000000000000006 = {isa = PBXFileSystemSynchronizedRootGroup; path = Town; sourceTree = "<group>";};
-A00000000000000000000007 = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Town.app; sourceTree = BUILT_PRODUCTS_DIR;};
-A00000000000000000000008 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000012, A00000000000000000000013); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
-A00000000000000000000009 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
-A00000000000000000000010 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 26.0;};};
-A00000000000000000000011 = {isa = XCBuildConfiguration; name = Release; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 26.0;};};
-A00000000000000000000012 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于将你说的话转换为对话输入文字。"; INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。"; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_CFBundleDisplayName = Being; PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; CODE_SIGN_STYLE = Automatic; "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;};};
-A00000000000000000000013 = {isa = XCBuildConfiguration; name = Release; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于将你说的话转换为对话输入文字。"; INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。"; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_CFBundleDisplayName = Being; PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; CODE_SIGN_STYLE = Automatic; "CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;};};
-A00000000000000000000014 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
-}; rootObject = A00000000000000000000001; }
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 71;
+	objects = {
+
+		B01000000000000000000001 /* TownTests */ = {isa = PBXNativeTarget; buildConfigurationList = B01000000000000000000006; buildPhases = (B01000000000000000000004, B01000000000000000000005); buildRules = (); dependencies = (B01000000000000000000009); fileSystemSynchronizedGroups = (B01000000000000000000002); name = TownTests; productName = TownTests; productReference = B01000000000000000000003; productType = "com.apple.product-type.bundle.unit-test"; };
+		B01000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = TownTests; sourceTree = "<group>"; };
+		B01000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TownTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B01000000000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B01000000000000000000005 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B01000000000000000000006 = {isa = XCConfigurationList; buildConfigurations = (B01000000000000000000007, B01000000000000000000008); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B01000000000000000000009 = {isa = PBXTargetDependency; target = A00000000000000000000005; targetProxy = B01000000000000000000010; };
+		B01000000000000000000010 = {isa = PBXContainerItemProxy; containerPortal = A00000000000000000000001; proxyType = 1; remoteGlobalIDString = A00000000000000000000005; remoteInfo = Town; };
+		B01000000000000000000007 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp.TownTests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Town.app/Town"; }; };
+		B01000000000000000000008 = {isa = XCBuildConfiguration; name = Release; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp.TownTests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Town.app/Town"; }; };
+
+		B02000000000000000000001 /* TownUITests */ = {isa = PBXNativeTarget; buildConfigurationList = B02000000000000000000006; buildPhases = (B02000000000000000000004, B02000000000000000000005); buildRules = (); dependencies = (B02000000000000000000009); fileSystemSynchronizedGroups = (B02000000000000000000002); name = TownUITests; productName = TownUITests; productReference = B02000000000000000000003; productType = "com.apple.product-type.bundle.ui-testing"; };
+		B02000000000000000000002 = {isa = PBXFileSystemSynchronizedRootGroup; path = TownUITests; sourceTree = "<group>"; };
+		B02000000000000000000003 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = TownUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B02000000000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B02000000000000000000005 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		B02000000000000000000006 = {isa = XCConfigurationList; buildConfigurations = (B02000000000000000000007, B02000000000000000000008); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		B02000000000000000000009 = {isa = PBXTargetDependency; target = A00000000000000000000005; targetProxy = B02000000000000000000010; };
+		B02000000000000000000010 = {isa = PBXContainerItemProxy; containerPortal = A00000000000000000000001; proxyType = 1; remoteGlobalIDString = A00000000000000000000005; remoteInfo = Town; };
+		B02000000000000000000007 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp.TownUITests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Town; }; };
+		B02000000000000000000008 = {isa = XCBuildConfiguration; name = Release; buildSettings = {GENERATE_INFOPLIST_FILE = YES; CODE_SIGN_STYLE = Automatic; PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp.TownUITests; PRODUCT_NAME = "$(TARGET_NAME)"; TARGETED_DEVICE_FAMILY = "1,2"; TEST_TARGET_NAME = Town; }; };
+
+/* Begin PBXFileReference section */
+		A00000000000000000000007 /* Town.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Town.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A00000000000000000000006 /* Town */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Town; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXGroup section */
+		A00000000000000000000003 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000006 /* Town */,
+				B02000000000000000000002 /* TownUITests */,
+				B01000000000000000000002 /* TownTests */,
+				A00000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000007 /* Town.app */,
+				B02000000000000000000003 /* TownUITests.xctest */,
+				B01000000000000000000003 /* TownTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00000000000000000000005 /* Town */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000008 /* Build configuration list for PBXNativeTarget "Town" */;
+			buildPhases = (
+				A00000000000000000000009 /* Sources */,
+				A00000000000000000000014 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A00000000000000000000006 /* Town */,
+			);
+			name = Town;
+			productName = Town;
+			productReference = A00000000000000000000007 /* Town.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 2600;
+			};
+			buildConfigurationList = A00000000000000000000002 /* Build configuration list for PBXProject "Town" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = zh_CN;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				zh_CN,
+				Base,
+			);
+			mainGroup = A00000000000000000000003;
+			productRefGroup = A00000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00000000000000000000005 /* Town */,
+				B02000000000000000000001 /* TownUITests */,
+				B01000000000000000000001 /* TownTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00000000000000000000014 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000000009 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A00000000000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7N8XHQWCNN;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Being;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于将你说的话转换为对话输入文字。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄照片并添加到对话附件。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于选择照片并添加到对话附件。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				ENABLE_TESTABILITY = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A00000000000000000000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 7N8XHQWCNN;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Being;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于将你说的话转换为对话输入文字。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄照片并添加到对话附件。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于选择照片并添加到对话附件。";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = town.beings.nativeapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00000000000000000000002 /* Build configuration list for PBXProject "Town" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000010 /* Debug */,
+				A00000000000000000000011 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000008 /* Build configuration list for PBXNativeTarget "Town" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000012 /* Debug */,
+				A00000000000000000000013 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000000001 /* Project object */;
+}

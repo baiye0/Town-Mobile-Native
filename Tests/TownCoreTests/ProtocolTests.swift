@@ -31,6 +31,12 @@ import Testing
     #expect(events[0].data == #"{"text":"你好 AB3XY9"}"#)
     #expect(events[1].name == "message_stop")
 }
+@Test func sseBytesFlushAnUnterminatedFinalFrameAtEOF() throws {
+    var parser = SSEByteParser()
+    let wire = "event: text\ndata: {\"text\":\"末帧\"}\n"
+    for byte in wire.utf8 { _ = try parser.consume(byte) }
+    #expect(parser.finish() == SSEEvent(name: "text", data: #"{"text":"末帧"}"#))
+}
 @Test func pairingConsumesActualSSEBytes() throws {
     var parser = SSEByteParser()
     var collector = PairCodeCollector(sceneID:"pair")

@@ -3,6 +3,23 @@ import org.junit.Test
 import org.junit.Assert.*
 import org.json.JSONObject
 class HistoryPresentationTest {
+    @Test fun sbsStatusSeparatesHumanAndFinishedStreams() {
+        assertNull(HistoryRules.sbsStatus(JSONObject()))
+        assertEquals("",HistoryRules.sbsStatus(JSONObject("""{"stream_id":"a","finished":false,"origin":"human"}""")))
+        assertEquals("",HistoryRules.sbsStatus(JSONObject("""{"stream_id":"a","finished":true,"origin":"sbs"}""")))
+        assertEquals("",HistoryRules.sbsStatus(JSONObject("""{"stream_id":"a","finished":false,"origin":"sbs","scene_id":"chat"}""")))
+        assertEquals("SBS 回调 · 正在执行工具",HistoryRules.sbsStatus(JSONObject("""{"stream_id":"a","finished":false,"origin":"callback","events":[{"event":"tool_use","data":{}}]}""")))
+    }
+
+    @Test fun recentHistoryAndSafeFailureDetails() {
+        assertEquals("/api/history?limit=500",HistoryRules.requestPath(0))
+        assertEquals("/api/history?limit=500&after=501",HistoryRules.requestPath(501))
+        assertTrue(HistoryRules.failureMessage(java.net.SocketTimeoutException()).contains("超时"))
+        assertTrue(HistoryRules.failureMessage(IllegalStateException("HTTP 401")).contains("凭据"))
+        assertTrue(HistoryRules.failureMessage(IllegalStateException("HTTP 503")).contains("HTTP 503"))
+        assertFalse(HistoryRules.failureMessage(IllegalStateException("secret-token")).contains("secret-token"))
+    }
+
     @Test fun localCachePreservesPresentationMetadata() {
         val message=Message("being","已停止","scene",7,"marker","2026-10-14T10:30:00Z","主对话")
         assertEquals(message,HistoryRules.decodeLocal(HistoryRules.encodeLocal(message)))

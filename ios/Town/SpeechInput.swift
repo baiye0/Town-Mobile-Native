@@ -2,8 +2,8 @@ import SwiftUI
 @preconcurrency import Speech
 @preconcurrency import AVFoundation
 
-@MainActor @Observable final class SpeechInput {
-    var active = false
+@MainActor final class SpeechInput: ObservableObject {
+    @Published var active = false
     private var generation = UUID()
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -11,9 +11,9 @@ import SwiftUI
     private var timer: Task<Void,Never>?
     private var tapped = false
     private var hasTranscript = false
-    private(set) var finishing = false
-    private(set) var startedAt: Date?
-    private(set) var levels = Array(repeating: Float(0), count: 36)
+    @Published private(set) var finishing = false
+    @Published private(set) var startedAt: Date?
+    @Published private(set) var levels = Array(repeating: Float(0), count: 36)
     private var lastMeterUpdate = Date.distantPast
     private func meter(_ value: Float, generation id: UUID) {
         guard generation == id, active, !finishing, Date().timeIntervalSince(lastMeterUpdate) >= 0.08 else { return }
@@ -45,7 +45,14 @@ import SwiftUI
         let auth = await withCheckedContinuation { continuation in SFSpeechRecognizer.requestAuthorization { continuation.resume(returning:$0) } }
         guard generation == id else { return }
         guard auth == .authorized else { stop(); failure("请在系统设置中允许 Being 使用语音识别。"); return }
-        let microphone = await AVAudioApplication.requestRecordPermission()
+        let microphone: Bool
+        if #available(iOS 17.0, *) {
+            microphone = await AVAudioApplication.requestRecordPermission()
+        } else {
+            microphone = await withCheckedContinuation { continuation in
+                AVAudioSession.sharedInstance().requestRecordPermission { continuation.resume(returning: $0) }
+            }
+        }
         guard generation == id else { return }
         guard microphone else { stop(); failure("请在系统设置中允许 Being 使用麦克风。"); return }
         guard let recognizer = SFSpeechRecognizer(locale:Locale.current),recognizer.isAvailable else { stop(); failure("系统语音识别暂不可用。"); return }

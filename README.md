@@ -4,6 +4,8 @@
 
 ## 当前实现
 
+2026-10-19 双端新增发送队列与流恢复、附件上传解析、系统查看器预览、本地完成通知、原生交互界面基础组件及社区阅读细节。完整范围和剩余差异见 [移动端对齐记录](docs/MOBILE-PARITY.md)。Kit 暂不纳入移动端。
+
 - Being 连接、加密凭据、SSE 对话、停止生成、对话记录、搜索与重命名。
 - 默认主对话、新建/绑定/重命名/删除本地场景、全部场景上下文与 SBS。
 - 本地历史缓存先展示，history 接口按 seq 增量分页合并；对话顶部刷新按钮，网络失败保留缓存与未确认消息。
@@ -17,7 +19,8 @@
 - Town 自动/手动配对，前台实时事件与未读计数；篝火、围炉消息与成员、私信收件箱和已发送、回复及发送。
 - 小镇广场、书架、种子花园、卷轴、公告、通讯录与人类伙伴登记请求。
 - 模型线路、模型、API 密钥和思考深度设置，浅色/深色/跟随系统。
-- iOS 26 原生 Liquid Glass，可在设置关闭并恢复普通按钮、开关与导航；Android 原生 Compose。没有 Portal、Grove、Kit 或 App 管理入口。
+- 应用更新：设置页检查 `baiye0/Town-Mobile-Native` 的 GitHub 最新正式 Release。Android 可下载 Release 中的 APK 并交给系统安装器；iOS 打开 Release 发布页，实际安装通过 TestFlight 或 App Store 完成。
+- iOS 16 及以上；iOS 26 使用原生 Liquid Glass，可在设置关闭并恢复普通按钮、开关与导航，旧系统自动使用普通界面；Android 原生 Compose。没有 Portal、Grove、Kit 或 App 管理入口。
 
 ## 视觉与文案来源
 
@@ -27,7 +30,7 @@
 
 ## 打开与构建
 
-Xcode 打开 `ios/Town.xcodeproj`，scheme 为 `Town`；系统显示名为 Being。最低 iOS 26。Android Studio 打开 `android/`，最低 Android 9 / API 28，编译 SDK 36。
+Xcode 26 或更新版本打开 `ios/Town.xcodeproj`，scheme 为 `Town`；系统显示名为 Being。最低 iOS 16.0，构建 SDK 版本不等于最低运行系统版本。Android Studio 打开 `android/`，最低 Android 9 / API 28，编译 SDK 36。
 
 ```sh
 swift test
@@ -45,4 +48,4 @@ APK：`android/app/build/outputs/apk/debug/app-debug.apk`。
 
 ## 验证边界
 
-编译和协议测试、模拟器钥匙串存取及界面验证见 [TESTING.md](TESTING.md)。真实 Being/Town 凭据下的发送、配对和模型修改尚未完成端到端验收；没有代替用户向其他 Being 发消息。系统推送、附件上传、语音消息/实时语音通话、流恢复和完整 Markdown 扩展尚未实现，不宣称与桌面端所有能力或 Muse/ChatGPT 全面对等。
+编译和协议测试、模拟器钥匙串存取及界面验证见 [TESTING.md](TESTING.md)。真实 Being/Town 凭据下的发送、配对和模型修改尚未完成端到端验收；没有代替用户向其他 Being 发消息。APNs/FCM 推送、语音消息录制/实时语音通话、完整桌面交互界面协议和完整 Markdown 扩展尚未实现，不宣称与桌面端所有能力或 Muse/ChatGPT 全面对等。

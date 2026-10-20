@@ -18,4 +18,8 @@ class ProtocolTest {
         assertEquals(SSEEvent("content_block_delta", "{\"delta\":\n{\"text\":\"你好\"}}"), p.line(""))
         assertNull(p.line("")); p.line("data: next"); assertEquals("message", p.line("")!!.name)
     }
+    @Test fun flushesUnterminatedFinalFrameAtEof() {
+        val p = SSEParser(); p.line("event: text"); p.line("data: {\"text\":\"末帧\"}")
+        assertEquals(SSEEvent("text", "{\"text\":\"末帧\"}"), p.line(""))
+    }
 }

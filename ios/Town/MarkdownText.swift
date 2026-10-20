@@ -1,5 +1,6 @@
 import SwiftUI
 struct MarkdownText: View {
+    @AppStorage("reading.size") private var readingSize = 16.0
     let text: String
     var previewMarkdownCode = true
     var foreground:Color? = nil
@@ -9,15 +10,15 @@ struct MarkdownText: View {
         VStack(alignment:.leading,spacing:8) {
             ForEach(Array(MarkdownRenderCache.blocks(text).enumerated()),id:\.offset) { _,block in
                 switch block.kind {
-                case .paragraph: inline(block.text).font(.system(size:16)).lineSpacing(7).textSelection(.enabled)
+                case .paragraph: inline(block.text).font(.system(size:readingSize)).lineSpacing(7).textSelection(.enabled)
                 case .heading: inline(block.text).font(.system(size:block.level == 1 ? 20 : block.level == 2 ? 18 : 16,weight:.semibold)).padding(.top,8).textSelection(.enabled)
                 case .list:
-                    HStack(alignment:.top,spacing:8) { Text(block.label).frame(minWidth:18,alignment:.trailing); inline(block.text).frame(maxWidth:.infinity,alignment:.leading) }.font(.system(size:16)).lineSpacing(6).padding(.leading,CGFloat(min(block.level,8))*16).textSelection(.enabled)
+                    HStack(alignment:.top,spacing:8) { Text(block.label).frame(minWidth:18,alignment:.trailing); inline(block.text).frame(maxWidth:.infinity,alignment:.leading) }.font(.system(size:readingSize)).lineSpacing(6).padding(.leading,CGFloat(min(block.level,8))*16).textSelection(.enabled)
                 case .quote:
-                    HStack(alignment:.top,spacing:12) { Rectangle().fill(ClientTheme.secondary.opacity(0.3)).frame(width:3);inline(block.text).font(.system(size:16)).lineSpacing(6).foregroundStyle(foreground ?? ClientTheme.secondary) }.fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                    HStack(alignment:.top,spacing:12) { Rectangle().fill(ClientTheme.secondary.opacity(0.3)).frame(width:3);inline(block.text).font(.system(size:readingSize)).lineSpacing(6).foregroundStyle(foreground ?? ClientTheme.secondary) }.fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
                 case .rule: Divider().padding(.vertical,8)
                 case .code:
-                    NativeCodeBlock(text:block.text,language:block.label,allowPreview:previewMarkdownCode).foregroundStyle(ClientTheme.text)
+                    if block.label.lowercased() == "intelligent-ui" { NativeUIView(source: block.text) } else { NativeCodeBlock(text:block.text,language:block.label,allowPreview:previewMarkdownCode).foregroundStyle(ClientTheme.text) }
                 case .table:
                     ScrollView(.horizontal) {
                         Grid(alignment:.topLeading,horizontalSpacing:0,verticalSpacing:0) {
@@ -53,7 +54,7 @@ struct NativeCodeBlock: View {
             }.font(.caption).padding(.horizontal,12).padding(.vertical,8)
             Divider()
             if markdown && !source { AnyView(MarkdownText(text:text,previewMarkdownCode:false)).padding(12) }
-            else { ScrollView(.horizontal) { Text(display).font(.system(size:13,design:.monospaced)).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal:true,vertical:false).padding(12) } }
+            else { ScrollView(.horizontal) { Text(highlightedCode(display)).font(.system(size:13,design:.monospaced)).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal:true,vertical:false).padding(12) } }
         }.background(ClientTheme.surface,in:RoundedRectangle(cornerRadius:10)).overlay(RoundedRectangle(cornerRadius:10).stroke(ClientTheme.secondary.opacity(0.15),lineWidth:1)).padding(.vertical,4)
     }
 }

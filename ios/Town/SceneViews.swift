@@ -1,6 +1,6 @@
 import SwiftUI
 struct SceneEditor: View {
-    @Environment(Store.self) private var store
+    @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     let binding: Bool
     @State private var name = ""
@@ -17,13 +17,13 @@ struct SceneEditor: View {
                     ToolbarItem(placement:.cancellationAction) { Button("取消") { dismiss() } }
                     ToolbarItem(placement:.confirmationAction) { Button(binding ? "绑定并进入" : "创建并进入") {
                         do { try store.createScene(name,binding:binding ? id.trimmingCharacters(in:.whitespacesAndNewlines) : nil); dismiss() } catch { self.error = error.localizedDescription }
-                    }.disabled(store.busy || name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || (binding && id.isEmpty)) }
+                    }.disabled(name.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || (binding && id.isEmpty)) }
                  } }
         }
     }
 }
 struct SceneDetails: View {
-    @Environment(Store.self) private var store
+    @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {

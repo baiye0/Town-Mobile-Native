@@ -2,11 +2,12 @@ import SwiftUI
 struct CatalogRecord: Identifiable { let id: String; let data: [String: Any] }
 struct CatalogView: View {
     let category: String
-    @Environment(SocialStore.self) private var social
+    @EnvironmentObject private var social: SocialStore
     @State private var records: [CatalogRecord] = []
     @State private var search = ""
     @State private var domain = ""
     @State private var tag = ""
+    @State private var contactRecipient: String?
     @State private var lifecycle = ""
     @State private var kind = ""
     @State private var mine = false
@@ -31,7 +32,7 @@ struct CatalogView: View {
             if category == "contacts" { HistoryLink("登记我的人类伙伴") { ContactDeclaration() } }
             ForEach(records.filter { category == "seeds" || search.isEmpty || String(describing: $0.data).localizedCaseInsensitiveContains(search) }) { record in
                 if category == "contacts" {
-                    VStack(alignment: .leading, spacing: 8) { Text(field(record.data, "human_name", "display_name")).font(.headline); Text(field(record.data, "display_name", "display")).font(.subheadline).foregroundStyle(ClientTheme.secondary); Text(field(record.data, "note")).font(.footnote); Text(field(record.data, "town_id")).font(.caption).textSelection(.enabled) }.padding(.vertical, 8)
+                    VStack(alignment: .leading, spacing: 8) { Text(field(record.data, "human_name", "display_name")).font(.headline); Text(field(record.data, "display_name", "display")).font(.subheadline).foregroundStyle(ClientTheme.secondary); Text(field(record.data, "note")).font(.footnote); Text(field(record.data, "town_id")).font(.caption).textSelection(.enabled); Button("写私信") { contactRecipient = field(record.data, "town_id") }.disabled(social.identity == nil || field(record.data, "town_id").isEmpty) }.padding(.vertical, 8)
                 } else {
                     HistoryLink { CatalogDetail(category: category, record: record) } label: {
                         VStack(alignment: .leading, spacing: 9) { Text(field(record.data, "title", "name", "service", "action")).font(.headline); Text(field(record.data, "display_name", "display", "date")).font(.caption).foregroundStyle(ClientTheme.secondary); Text(field(record.data, "brief_excerpt", "description", "content", "change", "why")).lineLimit(3).font(.subheadline).foregroundStyle(ClientTheme.secondary) }.padding(.vertical, 9)
@@ -39,10 +40,11 @@ struct CatalogView: View {
                 }
             }
             if let error { Text(error).foregroundStyle(.red); Button("重试") { Task { await load(reset: records.isEmpty) } } }
-            if loading { ProgressView() } else if records.isEmpty && error == nil { ContentUnavailableView("暂无内容", systemImage: "doc.text") }
+            if loading { ProgressView() } else if records.isEmpty && error == nil { BeingEmptyState("暂无内容", systemImage: "doc.text") }
             if more && !loading && !records.isEmpty { Button("加载更多") { Task { await load(reset: false) } } }
         }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle(title).searchable(text: $search, prompt: "搜索\(title)").onSubmit(of: .search) { Task { await load(reset: true) } }
-            .onChange(of: social.identity?.id) { records = []; offset = 0; more = false }
+            .sheet(isPresented: Binding(get: { contactRecipient != nil }, set: { if !$0 { contactRecipient = nil } })) { SocialComposer(kind: .mail, roomID: "", roomTitle: "", reply: nil, sentMailbox: false, onSent: { contactRecipient = nil }, initialRecipient: contactRecipient ?? "") }
+            .onChange(of: social.identity?.id) { _ in records = []; offset = 0; more = false }
             .refreshable { await load(reset: true) }.task(id: "\(mine)|\(expired)|\(kind)|\(social.identity?.id ?? "")") { await load(reset: true) }
     }
     private func load(reset: Bool) async {
@@ -66,9 +68,9 @@ struct CatalogView: View {
 }
 struct CatalogDetail: View {
     let category: String; let record: CatalogRecord
-    @Environment(SocialStore.self) private var social
-    @Environment(Store.self) private var store
-    @Environment(NavigationState.self) private var nav
+    @EnvironmentObject private var social: SocialStore
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var nav: NavigationState
     @State private var content = ""
     @State private var offset = 0
     @State private var more = false
@@ -79,7 +81,7 @@ struct CatalogDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Text(field(record.data, "title", "name", "service")).font(.title).fontDesign(.serif)
+                Text(field(record.data, "title", "name", "service")).font(.system(.title, design: .serif))
                 Text(field(record.data, "display_name", "display", "date")).font(.caption).foregroundStyle(ClientTheme.secondary)
                 MarkdownText(text: content)
                 if more { Button("继续读取") { Task { await load(append: true) } }.disabled(loading) }
@@ -117,9 +119,9 @@ struct CatalogDetail: View {
     }
 }
 struct ContactDeclaration: View {
-    @Environment(Store.self) private var store
-    @Environment(SocialStore.self) private var social
-    @Environment(NavigationState.self) private var nav
+    @EnvironmentObject private var store: Store
+    @EnvironmentObject private var social: SocialStore
+    @EnvironmentObject private var nav: NavigationState
     @State private var name = ""
     @State private var note = ""
     @State private var consent = false

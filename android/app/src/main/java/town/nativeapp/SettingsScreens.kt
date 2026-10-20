@@ -6,6 +6,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
@@ -16,6 +19,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.net.URLEncoder
+import androidx.compose.ui.platform.LocalContext
 
 @Composable fun MoreScreen(m: TownModel,social: SocialModel,nav: NavigationModel) {
     LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -23,9 +27,68 @@ import java.net.URLEncoder
         items(destinations.filter{it.id!="chat"}) { d -> ListItem(headlineContent={Text(d.title)},leadingContent={Icon(destinationIcon(d.id),null)},modifier=Modifier.clickable{nav.screen=d.id}) }
         item { HorizontalDivider();Text("设置",Modifier.padding(vertical=16.dp),fontWeight=FontWeight.Bold) }
         items(listOf("connection" to "连接 Being","pair" to "连接 Being Town","models" to "模型设置","navigation" to "自定义底部导航")) { (id,title) -> ListItem(headlineContent={Text(title)},modifier=Modifier.clickable{nav.screen=id}) }
+        item { ListItem(headlineContent={Text("对话设置")},leadingContent={Icon(Icons.Outlined.Chat,null)},modifier=Modifier.clickable{nav.screen="conversation-settings"}) }
+        item { ListItem(headlineContent={Text("通知设置")},leadingContent={Icon(Icons.Outlined.Notifications,null)},modifier=Modifier.clickable{nav.screen="notification-settings"}) }
+        item { AppUpdateSetting() }
+        item { SocialNotificationSettings() }
         item { Text("外观");Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("system" to "系统","light" to "浅色","dark" to "深色").forEach{(id,title)->FilterChip(selected=nav.appearance==id,onClick={nav.appearance(id)},label={Text(title)})}} }
         item { Text(social.status,fontSize=12.sp,color=MaterialTheme.colorScheme.primary) }
     }
+}
+
+@Composable fun ConversationSettingsScreen(m:TownModel){
+    LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
+        item { Text("SBS",fontWeight=FontWeight.SemiBold); if(m.connection!=null) SBSControl(m) else Text("连接 Being 后可配置 SBS",color=MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { HorizontalDivider(); ReadingSizeSetting() }
+    }
+}
+
+@Composable fun NotificationSettingsScreen(){
+    LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)){
+        item { Text("对话",fontWeight=FontWeight.SemiBold); CompletionNotificationSetting() }
+        item { HorizontalDivider(); SocialNotificationSettings() }
+    }
+}
+
+@Composable private fun SocialNotificationSettings() {
+    val context = LocalContext.current; val prefs = remember { context.getSharedPreferences("settings",0) }
+    var master by remember { mutableStateOf(prefs.getBoolean("notify.social.enabled",false)) }
+    Column(verticalArrangement=Arrangement.spacedBy(2.dp)) {
+        Text("小镇通知",fontWeight=FontWeight.SemiBold)
+        NotificationSwitch("小镇通知总开关",master,true){ master=it; prefs.edit().putBoolean("notify.social.enabled",it).apply() }
+        listOf("mail" to "私信","firesides" to "围炉","bonfire" to "篝火").forEach { (key,title) -> var enabled by remember { mutableStateOf(prefs.getBoolean("notify.social.$key",false)) }; NotificationSwitch(title,enabled,master){ enabled=it; prefs.edit().putBoolean("notify.social.$key",it).apply() } }
+        Text("配对 Town 后接收新消息提醒；通知不展示消息正文。",fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+@Composable private fun NotificationSwitch(title:String, checked:Boolean, enabled:Boolean, onChange:(Boolean)->Unit) { Row(Modifier.fillMaxWidth(),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically){Text(title,Modifier.weight(1f));Switch(checked,onChange,enabled=enabled)} }
+
+@Composable private fun AppUpdateSetting() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var state by remember { mutableStateOf("正在读取当前版本…") }
+    var release by remember { mutableStateOf<AppRelease?>(null) }
+    var working by remember { mutableStateOf(false) }
+    fun check() = scope.launch {
+        working = true
+        state = "正在检查更新…"
+        try {
+            val found = AppUpdates.latest()
+            release = found
+            state = if (AppUpdates.isNewer(found.version, BuildConfig.VERSION_NAME)) "发现新版本 ${found.version}" else "当前已是最新版本（${BuildConfig.VERSION_NAME}）"
+        } catch (e: Exception) { state = e.message ?: "暂时无法检查更新" }
+        finally { working = false }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("应用更新", fontWeight = FontWeight.SemiBold)
+        Text(state, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { check() }, enabled = !working) { Text("检查更新") }
+            if (release?.let { AppUpdates.isNewer(it.version, BuildConfig.VERSION_NAME) } == true) {
+                Button(onClick = { release?.let { item -> scope.launch { working = true; state = "正在下载升级包…"; try { AppUpdates.downloadAndInstall(context, item); state = "请在系统安装界面确认升级" } catch (e: Exception) { state = e.message ?: "升级失败" } finally { working = false } } } }, enabled = !working && release?.assetUrl != null) { Text("下载并升级") }
+            }
+        }
+    }
+    LaunchedEffect(Unit) { check() }
 }
 @Composable fun NavigationSettings(nav: NavigationModel) {
     LazyColumn(contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
@@ -51,6 +114,7 @@ import java.net.URLEncoder
     fun pair(auto:Boolean){working=true;error=null;job=scope.launch{try{withTimeout(90000){val being=if(auto)m.connection?.being ?: "" else name;val actual=if(auto)m.pairingCode() else code;social.pair(being,actual);code=""}}catch(e:TimeoutCancellationException){m.cancelPairing();error="90 秒内未完成自动配对，请使用手动配对。"}catch(e:CancellationException){throw e}catch(e:Exception){error=if(e is IllegalStateException && e.message?.contains("配对")==true)e.message else if(auto)"无法读取 Being 配对回复，请使用手动配对。" else "配对请求未完成，请检查网络；若配对码已失效，请获取新码。"}finally{working=false}}}
     LazyColumn(contentPadding=PaddingValues(24.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
         item { Text(social.status,fontWeight=FontWeight.Bold);social.identity?.let{Text(it.name.ifEmpty{it.id});Text(it.id,fontSize=12.sp);TextButton(onClick={social.unpair()},enabled=!working){Text("断开本机配对")}} }
+        item { AdvancedPairing(social) }
         item { Text("自动配对",fontSize=23.sp); }
         item { Button(onClick={pair(true)},enabled=!working&&!m.busy&&m.connection!=null,modifier=Modifier.fillMaxWidth()){Text(if(working)"正在连接…" else "自动连接 Town")};if(working)TextButton(onClick={m.cancelPairing();job?.cancel()}){Text("取消自动配对")} }
         item { HorizontalDivider();Text("手动配对",Modifier.padding(top=20.dp),fontSize=20.sp) }

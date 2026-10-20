@@ -1,9 +1,9 @@
 import SwiftUI
 
-@MainActor @Observable final class PageHistory {
-    var path: [UUID] = []
-    var forward: [UUID] = []
-    var pages: [UUID: AnyView] = [:]
+@MainActor final class PageHistory: ObservableObject {
+    @Published var path: [UUID] = []
+    @Published var forward: [UUID] = []
+    @Published var pages: [UUID: AnyView] = [:]
     func navigate(_ next: [UUID]) {
         if next.count < path.count && Array(path.prefix(next.count)) == next {
             forward.insert(contentsOf: path.dropFirst(next.count), at: 0)
@@ -25,7 +25,7 @@ extension EnvironmentValues {
 }
 struct HistoryStack<Content: View>: View {
     @Environment(\.pageHistory) private var inherited
-    @State private var history = PageHistory()
+    @StateObject private var history = PageHistory()
     @AppStorage("glassEffects") private var glass = true
     @ViewBuilder var content: () -> Content
     var body: some View {
@@ -38,7 +38,7 @@ struct HistoryStack<Content: View>: View {
                         .toolbar {
                             if !glass {
                                 AdaptiveToolbar {
-                                    ToolbarItem(placement: .topBarLeading) {
+                                    ToolbarItem(placement: .navigationBarLeading) {
                                         Button { history.back() } label: { Image(systemName: "chevron.left") }.accessibilityLabel("返回")
                                     }
                                 }

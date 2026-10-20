@@ -30,18 +30,19 @@ private fun inlineText(value:String)=buildAnnotatedString {
     };append(value.substring(last))
 }
 @Composable fun MarkdownText(text:String,previewMarkdownCode:Boolean=true,textColor:androidx.compose.ui.graphics.Color=MaterialTheme.colorScheme.onSurface){
+    val size=readingSize()
     val clipboard=LocalClipboardManager.current
     val blocks=androidx.compose.runtime.remember(text){MarkdownBlocks.parse(text)}
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
         blocks.forEach{b->when(b.kind){
             "rule"->HorizontalDivider()
-            "code"->NativeCodeBlock(b.text,b.label,previewMarkdownCode)
+            "code"->if(b.label.lowercase()=="intelligent-ui")NativeUIView(b.text) else NativeCodeBlock(b.text,b.label,previewMarkdownCode)
             "table"->Column(Modifier.horizontalScroll(rememberScrollState())){b.rows.forEachIndexed{index,row->
                 Row{row.forEach{cell->SelectionContainer{Text(inlineText(cell),Modifier.width(150.dp).background(if(index==0)MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface).padding(10.dp),fontSize=13.sp,fontWeight=if(index==0)FontWeight.SemiBold else FontWeight.Normal)}}};HorizontalDivider()
             }}
-            "list"->Row(Modifier.padding(start=(b.level*16).dp)){Text(b.label,Modifier.width(24.dp),color=textColor);SelectionContainer{Text(inlineText(b.text),fontSize=16.sp,lineHeight=25.sp,color=textColor)}}
-            "quote"->Row{Box(Modifier.width(3.dp).heightIn(min=28.dp).background(MaterialTheme.colorScheme.outline));SelectionContainer{Text(inlineText(b.text),Modifier.padding(start=12.dp),fontSize=16.sp,lineHeight=25.sp,color=textColor.copy(alpha=0.8f))}}
-            else->SelectionContainer{Text(inlineText(b.text),color=textColor,fontSize=(if(b.kind=="heading")when(b.level){1->20;2->18;else->16}else 16).sp,fontWeight=if(b.kind=="heading")FontWeight.SemiBold else FontWeight.Normal,lineHeight=25.sp)}
+            "list"->Row(Modifier.padding(start=(b.level*16).dp)){Text(b.label,Modifier.width(24.dp),color=textColor);SelectionContainer{Text(inlineText(b.text),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor)}}
+            "quote"->Row{Box(Modifier.width(3.dp).heightIn(min=28.dp).background(MaterialTheme.colorScheme.outline));SelectionContainer{Text(inlineText(b.text),Modifier.padding(start=12.dp),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor.copy(alpha=0.8f))}}
+            else->SelectionContainer{Text(inlineText(b.text),color=textColor,fontSize=(if(b.kind=="heading")when(b.level){1->size+4;2->size+2;else->size}else size).sp,fontWeight=if(b.kind=="heading")FontWeight.SemiBold else FontWeight.Normal,lineHeight=(size+9).sp)}
         }}
     }
 }
@@ -61,6 +62,14 @@ private fun inlineText(value:String)=buildAnnotatedString {
             TextButton(onClick={clipboard.setText(AnnotatedString(display))}){Text("复制代码",fontSize=12.sp)}
         }
         if(markdown&&!source)MarkdownText(text,false)
-        else SelectionContainer{Text(display,Modifier.horizontalScroll(rememberScrollState()),fontFamily=FontFamily.Monospace,fontSize=13.sp,lineHeight=21.sp)}
+        else SelectionContainer{Text(remember(display){highlightedCode(display)},Modifier.horizontalScroll(rememberScrollState()),fontFamily=FontFamily.Monospace,fontSize=13.sp,lineHeight=21.sp)}
     }
+}
+
+private fun highlightedCode(source:String):AnnotatedString {
+    if(source.length>100000)return AnnotatedString(source)
+    val builder=AnnotatedString.Builder(source)
+    val pattern=Regex("""["](?:\\.|[^"\\])*["]|'(?:\\.|[^'\\])*'|//[^\n]*|#[^\n]*|\b(?:true|false|null|nil|None|True|False|func|fun|function|class|struct|enum|import|from|return|if|else|for|while|let|var|val|const|async|await|try|catch|throw|public|private|def|in)\b|\b\d+(?:\.\d+)?\b""")
+    pattern.findAll(source).forEach{m->val v=m.value;val color=when{v.startsWith("\"")||v.startsWith("'")->androidx.compose.ui.graphics.Color(0xff478a50);v.startsWith("//")||v.startsWith("#")->androidx.compose.ui.graphics.Color.Gray;v.firstOrNull()?.isDigit()==true->androidx.compose.ui.graphics.Color(0xffb57925);else->androidx.compose.ui.graphics.Color(0xff9972c9)};builder.addStyle(SpanStyle(color=color),m.range.first,m.range.last+1)}
+    return builder.toAnnotatedString()
 }

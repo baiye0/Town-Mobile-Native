@@ -13,7 +13,7 @@ enum ClientTheme {
     static let secondary = color(0x686868,0xadadad)
     static let accent = color(0x292929,0xececec)
     // Muse screenshot: blue sent bubble and neutral received bubble.
-    static let chatSent = color(0x007aff,0x007aff)
+    static let chatSent = color(0x005fcc,0x005fcc)
     static let chatReply = color(0xebebed,0x383838)
     static let buttonText = color(0xffffff,0x242424)
     // Desktop Town feed tokens (styles.css:840–845).
@@ -33,13 +33,30 @@ enum ClientTheme {
 struct AdaptiveToolbar<Content: ToolbarContent>: ToolbarContent {
     @AppStorage("glassEffects") private var glass = true
     @ToolbarContentBuilder var content: () -> Content
-    var body: some ToolbarContent { content().sharedBackgroundVisibility(glass ? .automatic : .hidden) }
+    @ToolbarContentBuilder var body: some ToolbarContent {
+        if #available(iOS 26.0, *) {
+            content().sharedBackgroundVisibility(glass ? .automatic : .hidden)
+        } else {
+            content()
+        }
+    }
+}
+struct AdaptiveGlassContainer<Content: View>: View {
+    let spacing: CGFloat
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: spacing, content: content)
+        } else {
+            content()
+        }
+    }
 }
 private struct AdaptiveSurface: ViewModifier {
     @AppStorage("glassEffects") private var glass = true
     let radius: CGFloat
     @ViewBuilder func body(content: Content) -> some View {
-        if glass { content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius)) }
+        if #available(iOS 26.0, *), glass { content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: radius)) }
         else { content.background(ClientTheme.surface, in: RoundedRectangle(cornerRadius: radius)) }
     }
 }
@@ -47,7 +64,7 @@ private struct AdaptiveButton: ViewModifier {
     @AppStorage("glassEffects") private var glass = true
     let prominent: Bool
     @ViewBuilder func body(content: Content) -> some View {
-        if glass {
+        if #available(iOS 26.0, *), glass {
             if prominent { content.buttonStyle(.glassProminent) } else { content.buttonStyle(.glass) }
         } else {
             content.buttonStyle(SolidActionButtonStyle(prominent: prominent))

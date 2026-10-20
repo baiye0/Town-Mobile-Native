@@ -35,6 +35,7 @@ import org.json.JSONObject
     var room by rememberSaveable{mutableStateOf("")};var roomTitle by rememberSaveable{mutableStateOf("")};var mailbox by rememberSaveable{mutableStateOf("all")};var limit by rememberSaveable{mutableIntStateOf(100)}
     var rows by remember{mutableStateOf<List<JSONObject>>(emptyList())};var rooms by remember{mutableStateOf<List<JSONObject>>(emptyList())};var search by rememberSaveable{mutableStateOf("")}
     var loading by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)};var refresh by remember{mutableIntStateOf(0)};var composing by remember{mutableStateOf(false)};var reply by remember{mutableStateOf<JSONObject?>(null)};var showMembers by remember(room){mutableStateOf(false)}
+    var filters by remember{mutableStateOf(FeedFilter())};var showFilters by remember{mutableStateOf(false)}
     val scope=rememberCoroutineScope()
     var nextRoom by rememberSaveable { mutableStateOf("") }
     BackHandler(room.isNotEmpty()){nextRoom=room;room="";rows=emptyList()}
@@ -62,8 +63,15 @@ import org.json.JSONObject
         }
         if(room.isNotEmpty())Row(Modifier.padding(horizontal=20.dp)){Text(roomTitle,Modifier.weight(1f),fontSize=22.sp);TextButton(onClick={showMembers=true}){Text("成员")}}
         if(kind=="mail")Row(Modifier.padding(horizontal=20.dp),horizontalArrangement=Arrangement.spacedBy(12.dp)){listOf("all" to "全部","received" to "收件箱","sent" to "已发送").forEach{(value,title)->FilterChip(selected=mailbox==value,onClick={mailbox=value},label={Text(title)})}}
+        if(kind=="bonfire")AnnouncementStrip(social)
         if(kind=="bonfire")Row(Modifier.padding(horizontal=16.dp),horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf(50,100,200).forEach{n->FilterChip(selected=limit==n,onClick={limit=n},label={Text("$n 条")})};TextButton(onClick={nav.screen="announcements"}){Text("公告")}}
         OutlinedTextField(search,{search=it},Modifier.fillMaxWidth().padding(horizontal=20.dp),placeholder={Text("搜索消息或 Being")},singleLine=true)
+        TextButton(onClick={showFilters=!showFilters}){Text("筛选当前已加载消息")}
+        if(showFilters)Column(Modifier.padding(horizontal=20.dp)){
+            OutlinedTextField(filters.author,{filters=filters.copy(author=it)},label={Text("作者名称或 ID")},singleLine=true)
+            Row{listOf("all" to "全部","about" to "与我有关","mentions" to "提到我","mine" to "我发送的").forEach{(id,label)->TextButton(onClick={filters=filters.copy(relation=id)}){Text(if(filters.relation==id)"✓ $label" else label)}}}
+            Row{listOf(0 to "不限",1 to "一天",7 to "七天",30 to "三十天").forEach{(days,label)->TextButton(onClick={filters=filters.copy(days=days)}){Text(if(filters.days==days)"✓ $label" else label)}};TextButton(onClick={filters=filters.copy(oldestFirst=!filters.oldestFirst)}){Text(if(filters.oldestFirst)"最早优先" else "最新优先")}}
+        }
         LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(28.dp)){
             if(kind=="firesides"&&room.isEmpty())items(rooms.filter{search.isEmpty()||it.field("name","title").contains(search,true)},key={it.field("id","fireside_id")}){r->
                 Row(Modifier.fillMaxWidth().clickable{room=r.field("id","fireside_id");roomTitle=r.field("name","title");rows=emptyList()}.padding(vertical=10.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)){
@@ -72,7 +80,7 @@ import org.json.JSONObject
                     Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight,null,Modifier.size(16.dp))
                 }
             }
-            else items(rows.filter{search.isEmpty()||it.toString().contains(search,true)}){row->
+            else items(rows.filter{filters.matches(it,social.identity?.id ?: "")&&(search.isEmpty()||it.toString().contains(search,true))}.let{if(filters.oldestFirst)it.reversed() else it}){row->
                 SocialMessageCard(row,kind){reply=row;composing=true}
             }
             error?.let{item{Text(it,color=MaterialTheme.colorScheme.error)}}
@@ -114,8 +122,8 @@ import org.json.JSONObject
     }
 }
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun SocialComposeSheet(kind:String,room:String,roomTitle:String,reply:JSONObject?,sentMailbox:Boolean,m:TownModel,social:SocialModel,nav:NavigationModel,onDismiss:()->Unit,onSent:()->Unit){
-    var recipient by rememberSaveable{mutableStateOf(if(sentMailbox || reply?.field("sender_town_id")==social.identity?.id)reply?.field("recipient_town_id","recipient_display","recipient_display_name") ?: "" else reply?.field("sender_town_id","town_id","sender_display","sender_display_name") ?: "")}
+@Composable fun SocialComposeSheet(kind:String,room:String,roomTitle:String,reply:JSONObject?,sentMailbox:Boolean,m:TownModel,social:SocialModel,nav:NavigationModel,onDismiss:()->Unit,onSent:()->Unit,initialRecipient:String=""){
+    var recipient by rememberSaveable{mutableStateOf(if(initialRecipient.isNotEmpty())initialRecipient else if(sentMailbox || reply?.field("sender_town_id")==social.identity?.id)reply?.field("recipient_town_id","recipient_display","recipient_display_name") ?: "" else reply?.field("sender_town_id","town_id","sender_display","sender_display_name") ?: "")}
     var text by rememberSaveable{mutableStateOf("")};var busy by remember{mutableStateOf(false)};var error by remember{mutableStateOf<String?>(null)};val scope=rememberCoroutineScope();val max=if(kind=="bonfire")4000 else 32000
     ModalBottomSheet(onDismissRequest={if(!busy)onDismiss()},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)){
         Column(Modifier.fillMaxWidth().imePadding().verticalScroll(rememberScrollState()).padding(24.dp),verticalArrangement=Arrangement.spacedBy(16.dp)){

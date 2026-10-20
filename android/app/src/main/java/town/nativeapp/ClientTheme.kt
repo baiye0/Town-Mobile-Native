@@ -17,7 +17,7 @@ fun clientColors(dark:Boolean):ColorScheme {
 // Muse screenshot: blue sent bubble and neutral received bubble.
 fun ColorScheme.chatBubble(user:Boolean):Color {
     val dark=background.luminance()<0.5f
-    return Color(if(user){if(dark)0xff007aff else 0xff007aff}else{if(dark)0xff383838 else 0xffebebed})
+    return Color(if(user){if(dark)0xff005fcc else 0xff005fcc}else{if(dark)0xff383838 else 0xffebebed})
 }
 
 fun ColorScheme.feedAction()=Color(if(background.luminance()<0.5f)0xff8abbff else 0xff1767c4)
