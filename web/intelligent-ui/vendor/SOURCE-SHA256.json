@@ -1,0 +1,21 @@
+{
+  "LICENSE": "b7b2fd9cbcccfe1b910eef45a61f965b0f85021463a93a02b45a743fff0dfee1",
+  "components/clipboard.ts": "6578d2ff9f223764dd5e23c3d02f2bc9a8cb0801f53a782b6db35de47166fbd3",
+  "components/remote-image.tsx": "407a96cdc501e81682774b5846cd70facc924f71c9e9d9284a36f2e2372ecc0e",
+  "intelligent-ui/app-host.tsx": "7b891ce439c1cf8e2b91ba8924134e8ec515cf5d663749ee5020fc6b218ee6f0",
+  "intelligent-ui/bicycle-asset.ts": "63a148644cfc321c5c526265e0f6dac7e1e40013b78ff22065c15798e5460855",
+  "intelligent-ui/catalog.ts": "c99985fb83f50578a7b61a6fb41657609776a3dfbac5a959c720d6f17a03356e",
+  "intelligent-ui/content.tsx": "e96e8fbba9d262e9dbd68ec501c64a162b2035e3d4b4205bf212b160caf31388",
+  "intelligent-ui/context.ts": "aac44903f3d349425fc0861d158662a354002caf7d803fb6b96281878804ad57",
+  "intelligent-ui/design.ts": "53e320bd44dec91be1cea57d7f79745bfe59f85582b80a1633f24f52c672bb36",
+  "intelligent-ui/explorers.tsx": "42e2d2a2af2d8b4afdb30efe4776926084c201d404c664b6ef2b882ba56425f5",
+  "intelligent-ui/feedback.tsx": "f0aec75b55e5f47e847dc77e72786dc8abd880f3bd865dbde65afbf402c6d8a9",
+  "intelligent-ui/runtime.ts": "b4a80d1c1c74a3ec431f1314f06d0e5f58205a9df1316673c2d731b97555ef1d",
+  "intelligent-ui/storage.ts": "52b660f33919dfb92c603448829d4a4cb9e1a31feaf25a4acd4a8a9136c4128f",
+  "intelligent-ui/stream.ts": "1ea78cae0a50242709ad1b77268ccb112ec979340f8bf9f073d8623e9a7f75ff",
+  "intelligent-ui/styles.css": "82c9049d794dc96592e04cec52526dc1aa5056962391cc46e53b5da19ad6d017",
+  "intelligent-ui/surface-view.tsx": "d9363bf297c470268f037f37aea50777847a3f874d482009fd2801016f8f3d61",
+  "intelligent-ui/surfaces.ts": "423163b1980639ff41a76572b2a640fe425ad4a0e9d3536d94bcfdd4f4ad0f96",
+  "intelligent-ui/view.tsx": "d8c77f3b27725e25358ca4e4a16d775670c47aa5f33e05855041a1aa56112e98",
+  "intelligent-ui/visuals.tsx": "f7d98ba0958d7e532e2f9555f75f5279e3fa1601e385920910c221b51bdc236b"
+}

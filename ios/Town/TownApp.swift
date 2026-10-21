@@ -121,6 +121,13 @@ private struct ConversationComposer: View {
     var body: some View {
         return VStack(spacing: 8) {
             if let notice = store.notice { Text(notice).font(.caption).foregroundStyle(.red).padding(.horizontal).accessibilityAddTraits(.updatesFrequently) }
+            if store.intelligentUISelection != nil && store.intelligentUI {
+                HStack {
+                    Label("已带入智能界面和当前选择", systemImage: "slider.horizontal.3").font(.caption)
+                    Spacer()
+                    Button("移除") { store.intelligentUISelection = nil }.font(.caption)
+                }.padding(.horizontal, 18).accessibilityIdentifier("intelligentUISelection")
+            }
             AdaptiveGlassContainer(spacing: 12) {
                 VStack(spacing: 0) {
                     // Muse keeps selected images in the composer itself. This makes
@@ -323,15 +330,15 @@ struct ChatView: View {
                     }.padding(24).modifier(LegacyChatContentGeometry(viewportHeight: legacyViewportHeight,
                                                                    metrics: $legacyScrollMetrics))
                 } else {
-                    VStack(alignment: .leading, spacing: 30) {
-                        ZStack {
-                            Circle().fill(ClientTheme.surface).frame(width: 106, height: 106)
-                            Image("ClientLogo").resizable().scaledToFit().frame(width: 106,height: 106).clipShape(RoundedRectangle(cornerRadius: 24))
-                        }.padding(.top, 48)
+                    VStack(alignment: .leading, spacing: 28) {
+                        Image("ClientLogo").resizable().scaledToFit().frame(width: 88, height: 88)
+                            .clipShape(RoundedRectangle(cornerRadius: 24)).accessibilityHidden(true)
+                            .padding(.top, 36)
                         VStack(alignment: .leading, spacing: 12) {
-                            Text(store.connection == nil ? "从一个想法开始" : "Being").font(.system(size: 35, weight: .regular))
+                            Text(store.connection == nil ? "从一个想法开始" : "Being").font(.largeTitle.weight(.medium))
                             Text(store.connection == nil ? "连接你的 Being，继续对话。" : "当前场景还没有对话。").font(.subheadline).foregroundStyle(ClientTheme.secondary)
-                            if store.connection == nil { Button("连接我的 Being") { showConnection = true }.beingButton(prominent: true).foregroundStyle(ClientTheme.buttonText).padding(.top, 16) }
+                            if store.connection == nil { Button("连接我的 Being") { showConnection = true }
+                                    .buttonStyle(SettingsActionStyle()).frame(maxWidth: 280).padding(.top, 16) }
                         }
                     }.frame(maxWidth: 520, alignment: .leading).padding(.horizontal, 28).padding(.bottom, 20).frame(maxWidth: .infinity)
                 }
@@ -444,7 +451,7 @@ struct HistoryView: View {
             List {
                 BeingIconButton("开启新对话", systemImage: "plus") { store.newChat(); dismiss() }.disabled(store.connection == nil)
                 ForEach(store.rooms.filter { query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) }) { room in
-                    Button { store.selected = room.id; dismiss() } label: {
+                    Button { store.selectScene(room.id); dismiss() } label: {
                         VStack(alignment: .leading, spacing: 6) { Text(room.title).foregroundStyle(ClientTheme.text); Text(room.updated, style: .date).font(.caption).foregroundStyle(ClientTheme.secondary) }.padding(.vertical, 6)
                     }.swipeActions { Button("删除本地记录", role: .destructive) { store.delete(room.id) } }
                 }
@@ -455,47 +462,55 @@ struct HistoryView: View {
         }.task { await store.history() }
     }
 }
+// Connection sheets and pushed settings share content without nesting navigation bars.
 struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            BeingConnectionView()
+                .toolbar { AdaptiveToolbar {
+                    ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }
+                } }
+        }
+    }
+}
+
+struct BeingConnectionView: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     @State private var link = ""
     @State private var connecting = false
-    @State private var model = ""
-    @State private var provider = ""
-    @StateObject private var appUpdate = AppUpdateStore()
     var body: some View {
-        HistoryStack {
-            Form {
-                Section {
-                    Label("Being", systemImage: "sparkle").font(.headline)
-
-                    SecureField("Being 完整连接地址", text: $link).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button(connecting ? "正在验证…" : "连接 Being") {
-                        connecting = true
-                        Task { if await store.connect(link) { link = ""; dismiss() }; connecting = false }
-                    }.disabled(link.isEmpty || connecting)
-                    if let error = store.notice { Text(error).font(.caption).foregroundStyle(.red) }
-                } header: { Text("连接") }
-                if let c = store.connection {
-                    Section("当前连接") { LabeledContent("Being", value: c.being); Text(c.endpoint).font(.caption).foregroundStyle(ClientTheme.secondary); Button("断开连接", role: .destructive) { store.disconnect(); dismiss() } }
-                    Section("模型") {
-                        LabeledContent("服务商", value: provider.isEmpty ? "由 Being 管理" : provider)
-                        LabeledContent("当前模型", value: model.isEmpty ? "正在读取…" : model)
-                        HistoryLink("模型设置") { ModelSettingsView() }
-                    }.task { if let data = try? await store.json(c, "/api/llm/config") { model = data["model"] as? String ?? "服务默认"; provider = data["provider"] as? String ?? "" } }
+        SettingsPage {
+            SettingsSection(title: "连接你的 Being", icon: "sparkles") {
+                SettingsNote(text: "粘贴完整连接地址，继续与你的 Being 对话。")
+                SecureField("Being 完整连接地址", text: $link)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                Button(connecting ? "正在验证…" : "连接 Being") {
+                    connecting = true
+                    Task { if await store.connect(link) { link = ""; dismiss() }; connecting = false }
+                }.buttonStyle(SettingsActionStyle()).disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || connecting)
+                if let error = store.notice { Text(error).font(.footnote).foregroundStyle(.red) }
+            }
+            if let connection = store.connection {
+                SettingsSection(title: "当前连接", icon: "checkmark.shield") {
+                    LabeledContent("Being", value: connection.being)
+                    Text(connection.endpoint).font(.footnote).foregroundStyle(ClientTheme.secondary).textSelection(.enabled)
+                    Button("断开连接", role: .destructive) { store.disconnect(); dismiss() }
+                        .frame(minHeight: 44)
                 }
-                Section("Town") { Link(destination: URL(string: "https://beings.town")!) { Label("探索 Being Town", systemImage: "leaf") }; Text("小镇内容在系统浏览器中打开。").font(.caption).foregroundStyle(ClientTheme.secondary) }
-                Section("应用更新") {
-                    Text(appUpdate.message).font(.caption).foregroundStyle(ClientTheme.secondary)
-                    HStack {
-                        Button("检查更新") { Task { await appUpdate.check() } }.disabled(appUpdate.phase == .checking)
-                        if appUpdate.phase == .available, let url = appUpdate.releaseURL { Link("打开发布页", destination: url) }
-                    }
-                    Text("iOS 版本需通过 TestFlight 或 App Store 完成安装，GitHub Release 用于检查版本和提供发布入口。").font(.caption2).foregroundStyle(ClientTheme.secondary)
-                }.task { if appUpdate.phase == .idle { await appUpdate.check() } }
-                Section { LabeledContent("版本", value: "\(appUpdate.currentVersion) · Native"); Text("SwiftUI · 原生界面").font(.caption).foregroundStyle(ClientTheme.secondary) }
-            }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("连接与设置").toolbar { AdaptiveToolbar {  ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } }  } }
-        }
+                SettingsCard {
+                    HistoryLink { ModelSettingsView() } label: {
+                        SettingsRow(title: "模型设置", icon: "cpu", subtitle: "线路、模型与思考深度")
+                    }.buttonStyle(.plain)
+                }
+            }
+            SettingsCard {
+                Link(destination: URL(string: "https://beings.town")!) {
+                    SettingsRow(title: "探索 Being Town", icon: "leaf", subtitle: "在浏览器中打开小镇")
+                }.buttonStyle(.plain)
+            }
+        }.navigationTitle("连接 Being")
     }
 }
 
@@ -519,6 +534,6 @@ struct SBSControlView: View {
                 Text("控制 SBS 是否主动开始任务").font(.caption).foregroundStyle(ClientTheme.secondary)
                 if let error = store.sbsError { Text(error).font(.caption).foregroundStyle(.red) }
             }
-        }.font(.subheadline).padding(.horizontal, 24).padding(.vertical, 4).background(ClientTheme.surface)
+        }.font(.subheadline)
     }
 }

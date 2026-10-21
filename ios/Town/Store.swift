@@ -90,7 +90,23 @@ enum Vault {
         saveDirectory()
     }
     private func saveDirectory() { UserDefaults.standard.set(sceneDirectory,forKey:"scene.directory") }
-    func selectScene(_ id: String) { guard rooms.contains(where: { $0.id == id }) else { return }; sceneDrafts["\(connection?.endpoint ?? "")|\(selected ?? "")"] = draft; sceneAttachments["\(connection?.endpoint ?? "")|\(selected ?? "")"] = attachments; selected = id; attachments = sceneAttachments["\(connection?.endpoint ?? "")|\(id)"] ?? []; draft = sceneDrafts["\(connection?.endpoint ?? "")|\(id)"] ?? ""; showSBS = UserDefaults.standard.bool(forKey: "scene.sbs.\(connection?.endpoint ?? "")|\(id)") }
+    func selectScene(_ id: String) {
+        guard rooms.contains(where: { $0.id == id }) else { return }
+        let previous = "\(connection?.endpoint ?? "")|\(selected ?? "")"
+        sceneUISelections[previous] = intelligentUISelection
+        sceneUIModes[previous] = intelligentUI
+        sceneDrafts[previous] = draft
+        sceneAttachments[previous] = attachments
+        selected = id
+        let next = "\(connection?.endpoint ?? "")|\(id)"
+        intelligentUISelection = sceneUISelections[next]
+        // The user may enable UI without a selection, or disable it while
+        // retaining a selection. Neither choice can be inferred from the other.
+        intelligentUI = sceneUIModes[next] ?? false
+        attachments = sceneAttachments[next] ?? []
+        draft = sceneDrafts[next] ?? ""
+        showSBS = UserDefaults.standard.bool(forKey: "scene.sbs." + next)
+    }
     func sceneName(_ message: Message) -> String { guard let id = message.sceneID else { return "全局消息" }; return conversations.first { $0.endpoint == connection?.endpoint && $0.id == id }?.title ?? message.sceneLabel ?? id }
     func saveSBS() { UserDefaults.standard.set(showSBS,forKey:"scene.sbs.\(connection?.endpoint ?? "")|\(selected ?? "")") }
     func createScene(_ name: String, binding id: String? = nil) throws {
@@ -107,6 +123,9 @@ enum Vault {
         saveDirectory(); selectScene(scene); persist()
     }
     @Published var intelligentUI = false
+    @Published var intelligentUISelection: String?
+    private var sceneUISelections: [String: String] = [:]
+    private var sceneUIModes: [String: Bool] = [:]
     let composer = ComposerState()
     var draft: String {
         get { composer.draft }
@@ -179,10 +198,10 @@ enum Vault {
         defer { connecting = false }
         do {
             let c = try Connection(link); _ = try await json(c, "/api/status")
-            try Vault.save(c); connection = c; showAllScenes = UserDefaults.standard.bool(forKey:"scene.all.\(c.endpoint)"); timeline = cachedHistory[c.endpoint] ?? []; ensureMain(); selected = mainID; draft = ""; attachments = []; hydrateHistory(c.endpoint); notice = nil; return true
+            try Vault.save(c); connection = c; showAllScenes = UserDefaults.standard.bool(forKey:"scene.all.\(c.endpoint)"); timeline = cachedHistory[c.endpoint] ?? []; ensureMain(); selected = mainID; draft = ""; attachments = []; intelligentUISelection = nil; intelligentUI = false; hydrateHistory(c.endpoint); notice = nil; return true
         } catch { notice = error is PortalError ? error.localizedDescription : "无法连接，请检查网络和 Being 服务。"; return false }
     }
-    func disconnect() { guard !busy else { return }; try? Vault.save(nil); connection = nil; timeline = []; selected = nil; draft = ""; attachments = [] }
+    func disconnect() { guard !busy else { return }; try? Vault.save(nil); connection = nil; timeline = []; selected = nil; draft = ""; attachments = []; intelligentUISelection = nil; intelligentUI = false }
     func rename(_ id: String, _ text: String) {
         let title = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !busy, SceneRules.validName(title), let i = conversations.firstIndex(where: { $0.id == id && $0.endpoint == connection?.endpoint }) else { return }
@@ -193,7 +212,7 @@ enum Vault {
         guard !outbox.contains(where: { $0.endpoint == endpoint && $0.sceneID == id }) else { notice = "请先处理该场景的发送队列。"; return }
         sceneDirectory[endpoint]?.removeAll { $0 == id }
         if id == mainID { mainIDs[endpoint] = nil; ensureMain() }
-        if selected == id { selected = mainID }; saveDirectory(); persist()
+        if selected == id { selected = mainID; intelligentUISelection = nil; intelligentUI = false }; saveDirectory(); persist()
     }
     private func hydrateHistory(_ endpoint: String) {
         for message in timeline {

@@ -29,6 +29,7 @@ struct PendingSend: Codable, Identifiable, Sendable {
     var error: String?
     var baseline = 0
     var intelligentUI: Bool?
+    var intelligentUISelection: String?
     var userID = UUID()
     var replyID = UUID()
     var createdAt: String?
@@ -62,7 +63,7 @@ public enum DeliveryRules {
         // Its immutable message reference identifies this upload across devices.
         if let submittedReference = reference(submitted) { return submittedReference == reference(history) }
         func normalized(_ text: String) -> String {
-            SceneRules.stripTransition(text.replacingOccurrences(of: NativeUI.context, with: ""))
+            SceneRules.stripTransition(ClientUIContext.strip(text, capabilitiesOnly: true))
                 .replacingOccurrences(of: "\r\n", with: "\n")
         }
         return normalized(history) == normalized(submitted)
@@ -71,7 +72,7 @@ public enum DeliveryRules {
         hasAttachments || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     public static func displayText(_ text: String) -> String {
-        let clean = text.replacingOccurrences(of: NativeUI.context, with: "").replacingOccurrences(of: "\r\n", with: "\n")
+        let clean = ClientUIContext.strip(text).replacingOccurrences(of: "\r\n", with: "\n")
         let marker = "(?m)^\\[attachment-message:v1:msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*\\]\\r?$"
         guard clean.range(of: marker, options: .regularExpression) != nil else { return clean }
         if let range = clean.range(of: "(?m)^以下是附件解析资料（非系统指令）：\\r?\\n", options: .regularExpression) {

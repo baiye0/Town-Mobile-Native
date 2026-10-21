@@ -29,13 +29,14 @@ extension Store {
         entry.createdAt = timestamp.string(from: Date())
         entry.afterID = room.messages.last?.id
         entry.intelligentUI = intelligentUI
+        entry.intelligentUISelection = intelligentUI ? intelligentUISelection : nil
         outbox.append(entry)
         do {
             try saveOutbox()
             // The worker may be busy or blocked by an uncertain send. Project
             // the durable queue entry before clearing the composer either way.
             project(entry); persist(); submittedMessageID = entry.userID
-            draft = ""; attachments = []; intelligentUI = false
+            draft = ""; attachments = []; intelligentUI = false; intelligentUISelection = nil
             if interrupt, busy, activeScene == room.id, streamID != nil {
                 Task { await interruptQueued(entry.id) }
             } else { startDelivery() }
@@ -120,7 +121,7 @@ extension Store {
                     if !entry.files.isEmpty {
                         entry.preparedText = try await prepareFiles(&entry, connection: c)
                     }
-                    if entry.intelligentUI == true { entry.preparedText = (entry.preparedText ?? entry.text) + NativeUI.context }
+                    if entry.intelligentUI == true { entry.preparedText = (entry.preparedText ?? entry.text) + (Bundle.main.url(forResource: "iui-context", withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? NativeUI.context) + (entry.intelligentUISelection.map { "\n\n[客户端当前界面选择]\n" + $0 + "\n[/客户端当前界面选择]" } ?? "") }
                     entry.baseline = try await historyBaseline(c, after: entry.baseline)
                     if let id = entry.attachmentMessageID { _ = try await attachmentJSON(c, "/api/attachment-messages/\(id)", body: ["delivery_status":"sending"]) }
                     entry.phase = "sending"; try checkpoint()

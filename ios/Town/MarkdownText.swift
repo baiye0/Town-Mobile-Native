@@ -5,7 +5,24 @@ struct MarkdownText: View {
     var previewMarkdownCode = true
     var foreground:Color? = nil
     var fillsWidth = true
-    private func inline(_ text:String) -> Text { Text(MarkdownRenderCache.inline(text)) }
+    @ViewBuilder private func inline(_ text: String) -> some View {
+        let parts = MarkdownImages.parse(text)
+        if parts.count == 1, case .text(let plain) = parts[0] {
+            Text(MarkdownRenderCache.inline(plain))
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                    switch part {
+                    case .text(let text):
+                        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(MarkdownRenderCache.inline(text))
+                        }
+                    case .image(let alt, let url): MarkdownImageView(alt: alt, url: url)
+                    }
+                }
+            }
+        }
+    }
     var body: some View {
         VStack(alignment:.leading,spacing:8) {
             ForEach(Array(MarkdownRenderCache.blocks(text).enumerated()),id:\.offset) { _,block in

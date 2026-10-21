@@ -10,20 +10,32 @@ struct PairingView: View {
     @State private var deadline: Task<Void, Never>?
     @State private var error: String?
     var body: some View {
-        Form {
-            AdvancedPairing()
-            Section { Label(social.status, systemImage: social.identity == nil ? "link" : "checkmark.shield"); if let identity = social.identity { LabeledContent("身份", value: identity.name.isEmpty ? identity.id : identity.name); Text(identity.id).font(.caption).foregroundStyle(ClientTheme.secondary); Button("断开本机配对", role: .destructive) { social.unpair() }.disabled(working) } }
-            Section("自动配对") {
-                Button(working ? "正在连接…" : "自动连接 Town") { run(auto: true) { let being = store.connection?.being ?? ""; let code = try await store.pairingCode(); try await social.pair(being, code) } }.disabled(working || store.busy || store.connection == nil)
-                if working { Button("取消", role: .cancel) { operation?.cancel() } }
+        SettingsPage {
+            SettingsSection(title: "小镇连接", icon: "link") {
+                Label(social.status, systemImage: social.identity == nil ? "link" : "checkmark.shield")
+                if let identity = social.identity {
+                    LabeledContent("身份", value: identity.name.isEmpty ? identity.id : identity.name)
+                    SettingsNote(text: identity.id)
+                    Button("断开本机配对", role: .destructive) { social.unpair() }.disabled(working).frame(minHeight: 44)
+                }
             }
-            Section("手动配对") {
-                TextField("Town ID 或 Being 名", text: $name).textInputAutocapitalization(.never).autocorrectionDisabled()
-                TextField("配对码", text: $code).textInputAutocapitalization(.characters).autocorrectionDisabled()
-                Button("确认配对") { run { try await social.pair(name, code); code = "" } }.disabled(working || name.isEmpty || code.count != 6)
+            SettingsSection(title: "自动配对", icon: "sparkles") {
+                SettingsNote(text: "使用当前 Being 获取配对码，连接你的小镇身份。")
+                Button(working ? "正在连接…" : "自动连接 Town") {
+                    run(auto: true) { let being = store.connection?.being ?? ""; let code = try await store.pairingCode(); try await social.pair(being, code) }
+                }.buttonStyle(SettingsActionStyle()).disabled(working || store.busy || store.connection == nil)
+                if working { Button("取消", role: .cancel) { operation?.cancel() }.frame(minHeight: 44) }
             }
-            if let error { Section { Text(error).foregroundStyle(.red) } }
-        }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("连接 Being Town").onAppear { if name.isEmpty { name = store.connection?.being ?? "" } }.onDisappear { operation?.cancel() }
+            SettingsSection(title: "手动配对", icon: "keyboard") {
+                TextField("Town ID 或 Being 名", text: $name).textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                TextField("配对码", text: $code).textInputAutocapitalization(.characters).autocorrectionDisabled().settingsInput()
+                Button("确认配对") { run { try await social.pair(name, code); code = "" } }
+                    .buttonStyle(SettingsActionStyle()).disabled(working || name.isEmpty || code.count != 6)
+            }
+            SettingsSection(title: "已有凭据", icon: "key") { AdvancedPairing() }
+            if let error { Text(error).font(.footnote).foregroundStyle(.red) }
+        }.navigationTitle("连接 Being Town")
+            .onAppear { if name.isEmpty { name = store.connection?.being ?? "" } }.onDisappear { operation?.cancel() }
     }
     private func run(auto: Bool = false, _ action: @escaping @MainActor () async throws -> Void) {
         working = true; error = nil
@@ -59,67 +71,129 @@ struct SocialView: View {
     @State private var composeTarget: SocialComposeTarget?
     @State private var loadID = UUID()
     @State private var showMembers = false
+    @State private var showFilters = false
+    @State private var showAnnouncements = false
     init(kind: Destination, initialRoomID: String = "", initialRoomTitle: String = "") {
         self.kind = kind
         _roomID = State(initialValue: initialRoomID)
         _roomTitle = State(initialValue: initialRoomTitle)
     }
+    private var roomList: Bool { kind == .firesides && roomID.isEmpty }
+    private var hasFilters: Bool {
+        !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+        (!roomList && (!filters.author.isEmpty || filters.relation != "all" || filters.days != 0 || filters.oldestFirst))
+    }
+    private var visibleRooms: [CatalogRecord] {
+        rooms.filter { search.isEmpty || field($0, "name", "title").localizedCaseInsensitiveContains(search.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .compactMap { room in
+                let id = field(room, "id", "fireside_id")
+                return id.isEmpty ? nil : CatalogRecord(id: id, data: room)
+            }
+    }
     var body: some View {
         HistoryStack {
             Group {
-                if social.identity == nil { BeingEmptyState { Label("连接 Town，继续阅读", systemImage: kind.icon) } description: { Text(ClientCopy.descriptions[kind.rawValue] ?? "") } actions: { HistoryLink("配置 Town 连接") { PairingView() }.beingButton(prominent: true).foregroundStyle(ClientTheme.buttonText) } }
-                else {
-                    List {
-                        Group {
-                        DisclosureGroup("筛选当前已加载消息") {
-                            TextField("作者名称或 ID", text: $filters.author)
-                            Picker("关系", selection: $filters.relation) { Text("全部").tag("all"); Text("与我有关").tag("about"); Text("提到我").tag("mentions"); Text("我发送的").tag("mine") }
-                            Picker("时间", selection: $filters.days) { Text("不限").tag(0); Text("最近一天").tag(1); Text("最近七天").tag(7); Text("最近三十天").tag(30) }
-                            Toggle("最早优先", isOn: $filters.oldestFirst)
+                if social.identity == nil {
+                    BeingEmptyState { Label("连接 Town，继续阅读", systemImage: kind.icon) }
+                        description: { Text(ClientCopy.descriptions[kind.rawValue] ?? "") }
+                        actions: { HistoryLink("配置 Town 连接") { PairingView() }.beingButton(prominent: true).foregroundStyle(ClientTheme.buttonText) }
+                } else {
+                    VStack(spacing: 0) {
+                        feedToolbar
+                        if kind == .mail {
+                            SocialChoiceChips(options: [("all", "全部"), ("received", "收件箱"), ("sent", "已发送")], selection: $mailbox)
+                                .padding(.horizontal, 20).padding(.bottom, 12)
                         }
-                        if kind == .mail { Picker("信箱", selection: $mailbox) { Text("全部").tag("all"); Text("收件箱").tag("received"); Text("已发送").tag("sent") }.pickerStyle(.segmented) }
-                        if kind == .bonfire { AnnouncementStrip(); Picker("读取数量", selection: $limit) { Text("最近 50 条").tag(50); Text("最近 100 条").tag(100); Text("最近 200 条").tag(200) }; HistoryLink("小镇公告") { CatalogView(category: "announcements") } }
-                        if kind == .firesides && roomID.isEmpty {
-                            ForEach(Array(rooms.filter { search.isEmpty || field($0,"name","title").localizedCaseInsensitiveContains(search) }.enumerated()), id: \.offset) { _, room in
-                                HistoryLink { SocialView(kind: kind, initialRoomID: field(room, "id", "fireside_id"), initialRoomTitle: field(room, "name", "title")) } label: {
-                                    HStack(spacing:14) {
-                                        Image(systemName:"person.2").font(.system(size:20,weight:.medium)).frame(width:48,height:48)
-                                            .foregroundStyle(ClientTheme.fireInk).background(ClientTheme.fireTint,in:RoundedRectangle(cornerRadius:16))
-                                        VStack(alignment:.leading,spacing:6) {
-                                            Text(field(room,"name","title")).font(.system(size:16,weight:.medium)).foregroundStyle(ClientTheme.text).lineLimit(2)
-                                            let detail = field(room,"description","topic")
-                                            if !detail.isEmpty { Text(detail).font(.system(size:13)).foregroundStyle(ClientTheme.secondary).lineLimit(2) }
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 20) {
+                                    Color.clear.frame(height: 0).id("feed-top")
+                                    if kind == .bonfire { AnnouncementStrip() }
+                                    if roomList {
+                                        ForEach(visibleRooms) { record in
+                                            let room = record.data
+                                            HistoryLink { SocialView(kind: kind, initialRoomID: field(room, "id", "fireside_id"), initialRoomTitle: field(room, "name", "title")) }
+                                                label: { roomRow(room) }.buttonStyle(.plain)
                                         }
-                                        Spacer(minLength:0)
-                                    }.padding(.vertical,10)
-                                }.listRowSeparator(.hidden).listRowBackground(Color.clear)
-                                    .listRowInsets(EdgeInsets(top:6,leading:20,bottom:6,trailing:20))
-                            }
-                        } else {
-                            ForEach(filteredRows) { row in
-                                SocialMessageCard(row:row, kind:kind) { composeTarget = SocialComposeTarget(reply:row) }
-                                    .listRowInsets(EdgeInsets(top:14,leading:20,bottom:14,trailing:20))
-                                    .listRowSeparator(.hidden).listRowBackground(Color.clear)
-                            }
+                                    } else {
+                                        ForEach(filteredRows) { row in
+                                            SocialMessageCard(row: row, kind: kind) { composeTarget = SocialComposeTarget(reply: row) }
+                                        }
+                                    }
+                                    if let error {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            Text(error).font(.footnote).foregroundStyle(.red)
+                                            Button("重试") { Task { await load() } }.frame(minHeight: 44)
+                                        }
+                                    }
+                                    if loading { ProgressView().frame(maxWidth: .infinity).padding(24) }
+                                    else if error == nil && (roomList ? visibleRooms.isEmpty : filteredRows.isEmpty) {
+                                        VStack(alignment: .leading, spacing: 12) {
+                                            Text(hasFilters ? "没有匹配的内容" : roomList ? "暂无围炉" : "暂无消息")
+                                                .foregroundStyle(ClientTheme.secondary)
+                                            if hasFilters { Button("清除搜索与筛选") { search = ""; filters = FeedFilter() }.frame(minHeight: 44) }
+                                        }.padding(.vertical, 20)
+                                    }
+                                }.frame(maxWidth: 680).padding(.horizontal, 20).padding(.bottom, 24)
+                                    .frame(maxWidth: .infinity)
+                            }.accessibilityIdentifier("socialFeed")
+                                .refreshable { await load() }
+                                .onChange(of: mailbox) { _ in proxy.scrollTo("feed-top", anchor: .top) }
                         }
-                        if let error { Text(error).foregroundStyle(.red); Button("重试") { Task { await load() } } }
-                        if loading { ProgressView().frame(maxWidth: .infinity) }
-                        else if error == nil && (kind == .firesides && roomID.isEmpty ? rooms.isEmpty : rows.isEmpty) { BeingEmptyState("暂无消息", systemImage: kind.icon) }
-                        }.listRowBackground(ClientTheme.background)
-                    }.listStyle(.plain).refreshable { await load() }.searchable(text: $search, prompt: "搜索\(kind.title)")
-                }
-            }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle(roomID.isEmpty ? kind.title : roomTitle).navigationBarTitleDisplayMode(.inline)
-                .toolbar { AdaptiveToolbar {
-                    ToolbarItemGroup(placement: .navigationBarTrailing) {
-                        if kind == .firesides && !roomID.isEmpty { BeingIconButton("成员", systemImage: "person.2") { showMembers = true } }
-                        if social.identity != nil && (kind != .firesides || !roomID.isEmpty) { BeingIconButton("写消息", systemImage: "square.and.pencil") { composeTarget = SocialComposeTarget(reply:nil) } }
                     }
-                 } }
+                }
+            }.background(ClientTheme.background).foregroundStyle(ClientTheme.text)
+                .navigationTitle(roomList || roomID.isEmpty ? kind.title : roomTitle).navigationBarTitleDisplayMode(.inline)
                 .task(id: "\(social.identity?.id ?? "")|\(roomID)|\(mailbox)|\(limit)|\(social.revision)") { await load() }
-                .onChange(of: social.identity?.id) { _ in rows = []; rooms = []; showMembers = false; composeTarget = nil }
+                .onChange(of: social.identity?.id) { _ in rows = []; rooms = []; showMembers = false; composeTarget = nil; showFilters = false }
                 .sheet(item: $composeTarget) { target in SocialComposer(kind: kind, roomID: roomID, roomTitle: roomTitle, reply: target.reply, sentMailbox: mailbox == "sent") { Task { await load() } } }
-                .sheet(isPresented: $showMembers) { FiresideMembersView(roomID: roomID) }.presentationDetents([.medium, .large])
+                .sheet(isPresented: $showMembers) { FiresideMembersView(roomID: roomID).presentationDetents([.medium, .large]) }
+                .sheet(isPresented: $showFilters) {
+                    SocialFilterSheet(roomList: roomList, kind: kind, search: $search, filters: $filters, limit: $limit)
+                }
+                .sheet(isPresented: $showAnnouncements) {
+                    HistoryStack {
+                        CatalogView(category: "announcements")
+                            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showAnnouncements = false } } }
+                    }.environment(\.pageHistory, nil)
+                }
         }
+    }
+    private var feedToolbar: some View {
+        HStack(spacing: 2) {
+            Text(roomList ? "\(visibleRooms.count) 个围炉" : "\(filteredRows.count) 条消息")
+                .font(.subheadline).foregroundStyle(ClientTheme.secondary).lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            SocialAction(title: roomList ? "搜索围炉" : "搜索与筛选", icon: "magnifyingglass") { showFilters = true }
+                .overlay(alignment: .topTrailing) {
+                    if hasFilters { Circle().fill(ClientTheme.feedAction).frame(width: 6, height: 6).padding(7).allowsHitTesting(false) }
+                }.accessibilityValue(hasFilters ? "已启用筛选" : "未筛选")
+            SocialAction(title: "刷新", icon: "arrow.clockwise") { Task { await load() } }.disabled(loading)
+            if !roomList {
+                SocialAction(title: kind == .mail ? "写私信" : "写消息", icon: "square.and.pencil") { composeTarget = SocialComposeTarget(reply: nil) }
+            }
+            if kind == .bonfire || !roomID.isEmpty {
+                Menu {
+                    if kind == .bonfire { Button { showAnnouncements = true } label: { Label("小镇公告", systemImage: "megaphone") } }
+                    if !roomID.isEmpty { Button { showMembers = true } label: { Label("围炉成员", systemImage: "person.2") } }
+                } label: {
+                    Image(systemName: "ellipsis").font(.system(size: 20)).frame(width: 44, height: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("更多操作")
+            }
+        }.padding(.leading, 20).padding(.trailing, 8).padding(.bottom, 4)
+            .frame(maxWidth: 720)
+    }
+    private func roomRow(_ room: [String: Any]) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "person.2").font(.system(size: 22)).frame(width: 48, height: 48)
+                .foregroundStyle(ClientTheme.fireInk).background(ClientTheme.fireTint, in: RoundedRectangle(cornerRadius: 16)).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(field(room, "name", "title")).font(.body.weight(.medium)).lineLimit(2)
+                let detail = field(room, "description", "topic")
+                if !detail.isEmpty { Text(detail).font(.subheadline).foregroundStyle(ClientTheme.secondary).lineLimit(2) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(ClientTheme.secondary).accessibilityHidden(true)
+        }.padding(.vertical, 10).contentShape(Rectangle())
     }
     private var filteredRows: [SocialRow] {
         let filtered = rows.filter { filters.matches($0.raw, me: social.identity?.id ?? "") && (search.isEmpty || $0.content.localizedCaseInsensitiveContains(search) || $0.author.localizedCaseInsensitiveContains(search)) }

@@ -18,3 +18,5 @@ DerivedData/
 *.jks
 *.keystore
 *.log
+
+web/intelligent-ui/node_modules/

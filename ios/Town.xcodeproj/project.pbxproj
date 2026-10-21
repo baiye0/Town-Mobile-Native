@@ -157,7 +157,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 7N8XHQWCNN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Being;
@@ -166,6 +166,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于将你说的话转换为对话输入文字。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄照片并添加到对话附件。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于将你选择的图片保存到相册。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于选择照片并添加到对话附件。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -186,7 +187,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 6;
 				DEVELOPMENT_TEAM = 7N8XHQWCNN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Being;
@@ -195,6 +196,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "用于将你说的话转换为对话输入文字。";
 				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄照片并添加到对话附件。";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于将你选择的图片保存到相册。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于选择照片并添加到对话附件。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

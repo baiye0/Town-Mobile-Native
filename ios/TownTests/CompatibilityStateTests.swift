@@ -185,3 +185,69 @@ import XCTest
         withExtendedLifetime(observation) {}
     }
 }
+
+@MainActor final class IntelligentUIStateTests: XCTestCase {
+    func testSceneSwitchPreservesExplicitUIModeIndependentlyOfSelection() throws {
+        let store = Store()
+        let connection = try Connection("https://example.invalid/ui-mode?token=test")
+        store.connection = connection
+        store.conversations = [Conversation(id: "one", endpoint: connection.endpoint), Conversation(id: "two", endpoint: connection.endpoint)]
+        store.sceneDirectory[connection.endpoint] = ["one", "two"]
+        store.selected = "one"
+        // A newly enabled UI request does not have a prior surface selection.
+        store.intelligentUI = true
+        store.selectScene("two")
+        XCTAssertFalse(store.intelligentUI)
+        store.selectScene("one")
+        XCTAssertTrue(store.intelligentUI)
+        XCTAssertNil(store.intelligentUISelection)
+        // Disabling the feature must survive a round trip even with a selection.
+        store.intelligentUISelection = "{\"revision\":1}"
+        store.intelligentUI = false
+        store.selectScene("two")
+        store.selectScene("one")
+        XCTAssertFalse(store.intelligentUI)
+        XCTAssertEqual(store.intelligentUISelection, "{\"revision\":1}")
+        store.selectScene("one")
+        XCTAssertFalse(store.intelligentUI)
+    }
+
+    func testUIStatePersistsNullAndIsolatesScopes() throws {
+        let suite = "IntelligentUIStateTests." + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        IntelligentUIStateCache.save(["optional": NSNull(), "count": 3], key: "surface", scope: "one", defaults: defaults)
+        let restored = try XCTUnwrap(IntelligentUIStateCache.load(scope: "one", defaults: defaults)["surface"] as? [String: Any])
+        XCTAssertTrue(restored["optional"] is NSNull)
+        XCTAssertEqual(restored["count"] as? Int, 3)
+        XCTAssertTrue(IntelligentUIStateCache.load(scope: "two", defaults: defaults).isEmpty)
+    }
+    func testSelectionFollowsSceneAndClearDoesNotChangeDraft() throws {
+        let store = Store()
+        let connection = try Connection("https://example.invalid/ui?token=test")
+        store.connection = connection
+        store.conversations = [Conversation(id: "one", endpoint: connection.endpoint), Conversation(id: "two", endpoint: connection.endpoint)]
+        store.sceneDirectory[connection.endpoint] = ["one", "two"]
+        store.selected = "one"
+        store.draft = "修改人数"
+        store.intelligentUI = true
+        store.intelligentUISelection = "{\"revision\":1}"
+        store.selectScene("two")
+        XCTAssertNil(store.intelligentUISelection)
+        XCTAssertFalse(store.intelligentUI)
+        store.selectScene("one")
+        XCTAssertEqual(store.intelligentUISelection, "{\"revision\":1}")
+        XCTAssertEqual(store.draft, "修改人数")
+        store.intelligentUISelection = nil
+        XCTAssertEqual(store.draft, "修改人数")
+    }
+    func testFileExporterPreservesOriginalBytesAndType() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+        let original = Data([137,80,78,71,13,10,26,10,1,2,3,4])
+        try original.write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let document = try ImageFileDocument(url: url)
+        XCTAssertEqual(document.data, original)
+        XCTAssertEqual(document.type.identifier, "public.png")
+    }
+}
