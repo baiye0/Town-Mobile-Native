@@ -31,6 +31,8 @@ import androidx.compose.ui.Alignment
             SettingsDivider()
             SettingsRow("模型设置", AppIcons.Model, "线路、模型与思考深度") { nav.screen="models" }
             SettingsDivider()
+            SettingsRow("本机 Portal", Icons.Outlined.Computer, "工作区、工具能力与运行状态") { nav.screen="portal" }
+            SettingsDivider()
             SettingsRow("通知设置", AppIcons.Bell) { nav.screen="notification-settings" }
             SettingsDivider()
             SettingsRow("外观", AppIcons.Palette, appearanceTitle(nav.appearance)) { nav.screen="appearance" }

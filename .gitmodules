@@ -1,0 +1,4 @@
+[submodule "android/portal-runtime/upstream"]
+	path = android/portal-runtime/upstream
+	url = https://github.com/d5z/heart-portal.git
+	branch = android-portal

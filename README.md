@@ -20,7 +20,7 @@
 - 小镇广场、书架、种子花园、卷轴、公告、通讯录与人类伙伴登记请求。
 - 模型线路、模型、API 密钥和思考深度设置，浅色/深色/跟随系统。
 - 应用更新：设置页检查 `baiye0/Town-Mobile-Native` 的 GitHub 最新正式 Release。Android 可下载 Release 中的 APK 并交给系统安装器；iOS 打开 Release 发布页，实际安装通过 TestFlight 或 App Store 完成。
-- iOS 16 及以上；iOS 26 使用原生 Liquid Glass，可在设置关闭并恢复普通按钮、开关与导航，旧系统自动使用普通界面；Android 原生 Compose。没有 Portal、Grove、Kit 或 App 管理入口。
+- iOS 16 及以上；iOS 26 使用原生 Liquid Glass，可在设置关闭并恢复普通按钮、开关与导航，旧系统自动使用普通界面；Android 原生 Compose。Android 本机 Portal（更多 → 本机 Portal）提供文件、搜索、网页获取、可选 Shell，以及按 Being 授权的日历、通讯录、提醒、分享、通知、位置和健康能力；构建与边界见 [Android Portal](docs/ANDROID-PORTAL.md) 和 [原生能力](docs/ANDROID-PORTAL-NATIVE.md)。Grove、桌面 Kit 和 App 管理入口未加入。
 
 ## 视觉与文案来源
 
@@ -31,6 +31,8 @@
 ## 打开与构建
 
 Xcode 26 或更新版本打开 `ios/Town.xcodeproj`，scheme 为 `Town`；系统显示名为 Being。最低 iOS 16.0，构建 SDK 版本不等于最低运行系统版本。Android Studio 打开 `android/`，最低 Android 9 / API 28，编译 SDK 36。
+
+Android 内置 Portal 通过 Git 子模块引用 `d5z/heart-portal` 的 `android-portal` 分支。先执行 `git submodule update --init --recursive`；还需要 NDK `27.2.12479018`、Rust `1.90.0` 及 `aarch64-linux-android` / `x86_64-linux-android` target，按 [构建说明](docs/ANDROID-PORTAL.md) 安装。Gradle 从固定的子模块提交构建并打包运行时。
 
 ```sh
 swift test

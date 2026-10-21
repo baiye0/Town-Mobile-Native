@@ -12,7 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @Composable fun ChatRunView(process:String,activity:String,isActive:Boolean) {
@@ -28,6 +27,5 @@ import androidx.compose.ui.unit.dp
             if(process.isNotEmpty())Icon(if(expanded)Icons.Outlined.ExpandMore else AppIcons.Chevron,if(expanded)"收起过程" else "展开过程",Modifier.size(16.dp))
         }
         if(expanded)SelectionContainer{Text(process,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
-        else if(isActive&&process.isNotEmpty())Text(process.takeLast(240).trim(),maxLines=3,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

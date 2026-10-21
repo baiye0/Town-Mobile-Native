@@ -162,11 +162,11 @@ class TownModel(app: Application) : AndroidViewModel(app) {
         client.newCall(request(c, path, body)).execute().use { r -> check(r.isSuccessful) { "HTTP ${r.code}" }; JSONObject(r.body!!.string()) }
     }
     fun connect(link: String, done: () -> Unit) { if (busy || connecting) return; connecting = true; viewModelScope.launch {
-        try { val c = Connection.parse(link); json(c, "/api/status"); vault.save(link.trim()); connection = c; showAllScenes=scenePrefs.getBoolean("all.${c.endpoint}",false); timeline=historyCache.optJSONArray(c.endpoint)?.let{a->(0 until a.length()).map{HistoryRules.decode(a.getJSONObject(it))}} ?: emptyList(); ensureMain(); selected = mainID; draft = ""; attachments=emptyList(); hydrateHistory(c.endpoint); notice = null; done() }
+        try { val c = Connection.parse(link); json(c, "/api/status"); PortalRuntime.stop(getApplication()); vault.save(link.trim()); AndroidPortalRestoreJob.enqueue(getApplication()); connection = c; showAllScenes=scenePrefs.getBoolean("all.${c.endpoint}",false); timeline=historyCache.optJSONArray(c.endpoint)?.let{a->(0 until a.length()).map{HistoryRules.decode(a.getJSONObject(it))}} ?: emptyList(); ensureMain(); selected = mainID; draft = ""; attachments=emptyList(); hydrateHistory(c.endpoint); notice = null; done() }
         catch (_: Exception) { notice = "连接失败，请检查 HTTPS 地址、token 和网络。" }
         finally { connecting = false }
     } }
-    fun disconnect() { if (busy) return; vault.save(null); connection = null; timeline=emptyList(); selected = null; draft = ""; attachments=emptyList() }
+    fun disconnect() { if (busy) return; PortalRuntime.stop(getApplication()); vault.save(null); AndroidPortalRestoreJob.enqueue(getApplication()); connection = null; timeline=emptyList(); selected = null; draft = ""; attachments=emptyList() }
     fun loadModel() { val c = connection ?: return; viewModelScope.launch { model = runCatching { json(c, "/api/llm/config").optString("model", "服务默认") }.getOrDefault("暂时无法读取") } }
     private fun hydrateHistory(endpoint:String){
         timeline.filter{it.sceneID!=null}.groupBy{it.sceneID!!}.forEach{(id,confirmed)->

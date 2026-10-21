@@ -48,11 +48,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LifecycleResumeEffect
 
 class MainActivity : ComponentActivity() {
-    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); setIntent(intent); CompletionNotifications.capture(intent) }
+    override fun onResume() { super.onResume(); AndroidPortalPolicy.foreground = true }
+    override fun onPause() { AndroidPortalPolicy.foreground = false; super.onPause() }
+    private var openPortal by mutableStateOf(false)
+    override fun onNewIntent(intent: android.content.Intent) { super.onNewIntent(intent); setIntent(intent); CompletionNotifications.capture(intent); openPortal = intent.getBooleanExtra("open_portal", false) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState); CompletionNotifications.capture(intent); enableEdgeToEdge()
+        openPortal = intent.getBooleanExtra("open_portal", false)
         setContent {
             val nav: NavigationModel = viewModel()
+            LaunchedEffect(openPortal) { if (openPortal) { nav.screen="portal"; openPortal=false } }
             val dark = nav.appearance == "dark" || nav.appearance == "system" && isSystemInDarkTheme()
             MaterialTheme(colorScheme = clientColors(dark)) { Town(nav = nav) }
         }
@@ -105,7 +110,7 @@ class MainActivity : ComponentActivity() {
         }
     }) {
         Scaffold(topBar={Column { CenterAlignedTopAppBar(
-            title={if(screen=="chat") Column(Modifier.clickable{nav.screen="conversation-settings"},horizontalAlignment=Alignment.CenterHorizontally){Text(m.current?.title ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);if(m.connection!=null)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)){SBSStatusDot(m.sbsEnabled==true,m.sbsActivity.isNotEmpty());Text(m.sbsStatus,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}} else Text(destinations.find{it.id==screen}?.title ?: mapOf("more" to "设置与小镇","connection" to "连接 Being","pair" to "小镇连接","models" to "模型设置","navigation" to "底部导航","conversation-settings" to "对话设置","notification-settings" to "通知设置","appearance" to "外观","updates" to "应用更新","queue" to "发送队列")[screen] ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},
+            title={if(screen=="chat") Column(Modifier.clickable{nav.screen="conversation-settings"},horizontalAlignment=Alignment.CenterHorizontally){Text(m.current?.title ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);if(m.connection!=null)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)){SBSStatusDot(m.sbsEnabled==true,m.sbsActivity.isNotEmpty());Text(m.sbsStatus,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}} else Text(destinations.find{it.id==screen}?.title ?: mapOf("more" to "设置与小镇","connection" to "连接 Being","pair" to "小镇连接","models" to "模型设置","portal" to "本机 Portal","navigation" to "底部导航","conversation-settings" to "对话设置","notification-settings" to "通知设置","appearance" to "外观","updates" to "应用更新","queue" to "发送队列")[screen] ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},
             navigationIcon={IconButton(onClick={if(screen in nav.tabs+"more")scope.launch{drawer.open()} else nav.back()}){Icon(if(screen in nav.tabs+"more")Icons.Outlined.Menu else Icons.AutoMirrored.Outlined.ArrowBack,"侧栏或返回")}},
             actions={if(screen=="chat") {
                 ActionIcon(AppIcons.List,"提问索引",m.displayMessages.any{it.role=="user"}) { showQuestionIndex=true }
@@ -127,6 +132,7 @@ class MainActivity : ComponentActivity() {
                 "pair" -> PairingScreen(m,social)
                 "queue" -> DeliveryQueueScreen(m)
                 "models" -> ModelsScreen(m)
+                "portal" -> PortalScreen(m.connection) { nav.screen="connection" }
                 "navigation" -> NavigationSettings(nav)
                 "conversation-settings" -> ConversationSettingsScreen(m)
                 "notification-settings" -> NotificationSettingsScreen()

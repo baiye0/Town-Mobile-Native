@@ -2,6 +2,8 @@
 .build/
 artifacts/
 .gradle/
+.kotlin/
+target/
 build/
 local.properties
 xcuserdata/

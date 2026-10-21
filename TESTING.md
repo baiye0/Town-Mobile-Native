@@ -1,3 +1,52 @@
+# Android Portal 提交前 Review 与出包（2026-10-21）
+
+- 本轮 Review 修复三处问题：桥接鉴权读取采用总时限避免慢速连接长期占用线程；写操作在获得排队锁后重新检查身份和策略，缓存重试也受检查；待处理操作达到上限时淘汰已结束历史，保留待处理项。
+- 最终 JVM 65 项通过；Android 16 模拟器完整 29 组端到端场景通过（新增慢速连接、排队撤权/切换身份、操作历史满额回归）；Lint 0 errors、62 warnings。此前 5 组权限 UI 回归通过，UI 此轮未变。
+- QA 仅安装在一次性模拟器。重跑完整 QA 前需卸载模拟器旧 QA 包清除 Health Connect 旧授权，避免否定用例前提失效。没有更改手机本体或自动放开手机权限。
+- 固定子模块与远程 `android-portal` 分支一致，提交 `5cf3acb005e06d990a4157dd83a18b9ba4857554`；Rust 本轮未修改，沿用该提交 323 passed、1 ignored 的记录。
+- 日志：`artifacts/portal-final-review-build.log`、`artifacts/portal-final-review-emulator.log`。最终按主仓提交标识命名的 Being 本体 Debug APK 及校验元数据保存在 `artifacts/`，正式商店 Release 签名未配置。
+- 地理围栏真实注册/到达、OEM 后台长测、非空健康数据仍是既有验证边界，详见 Review 文档。
+
+# Portal 系统授权交互优化（2026-10-21）
+
+- 开启能力会申请实际缺少的系统权限；每项独立显示 Being 策略与系统状态。拒绝、部分授权、系统不再弹窗、设置返回刷新、特殊访问、后台定位步骤均有对应提示。能力查询新增 `system_access`，不再仅报告本地开关。
+- JVM 65 项通过（新增 7 项权限状态回归）；Lint 0 errors、62 warnings；Debug APK 构建成功。ARM64/x86_64 Portal ELF 与上一版逐字节一致。
+- Android 16 模拟器 5 组 UI 回归通过：初始待授权、开关触发真实系统弹窗并拒绝后阻断工具、重复拒绝进入系统设置、设置返回刷新、关闭 Being 权限仍阻断工具。设置授予步骤使用模拟器 shell 授予日历读权限；没有访问真实用户数据。
+- 测试 runner `town.nativeapp.PortalPermissionInstrumentation` 仅允许无连接身份的模拟器运行；真机只覆盖安装 Being 本体，不安装 QA 或测试组件、不自动放开敏感权限。
+- 证据：`artifacts/portal-permissions-build.log`、`artifacts/portal-permissions-emulator-test.log`；安装包 `artifacts/being-portal-permissions-debug.apk`。
+- Redmi 本体覆盖安装成功并正常冷启动，已安装 APK SHA-256 与构建产物一致：`ff746073c96244d8d738def98aebaf11bd9588eca843aada870ab558f537fb9a`。真机拒绝 ADB 注入滑动（`INJECT_EVENTS`），因此授权交互回归结论来自模拟器；没有将真机仅安装/启动检查描述为权限流程全量通过。
+
+# 最新 Being 本体真机覆盖安装（2026-10-21）
+
+- 已在 Redmi Note 14 Pro+ / Android 16 / ARM64 覆盖安装 `town.beings.nativeapp` 本体，保留已有账号和聊天数据。安装后从手机读取 APK SHA-256，与最终产物 `7727cffab71876e008d09a7acebd66ab68e94ea6793d15a50391df529831ec97` 完全一致。
+- 正式包内 ARM64 `heart-portal --version` 执行成功（0.9.2），本体冷启动成功，已打开「本机 Portal」页面并检查截图，当前 Being 连接仍存在，页面包含手机原生能力入口，进程无 AndroidRuntime 崩溃日志。尚未启动真实 Being 的 Portal relay。
+- 本轮 QA 的运行时、relay/MCP 握手通过；原生 CRUD 回归被小米禁止 ADB 代授运行时权限拦截，不能记录为新增能力全量通过。按用户要求转为直接安装 Being 本体；临时 QA 和测试组件已移除，正式应用权限未自动放开。
+- 证据：`artifacts/android-native-device-install-2026-10-21.json`、`artifacts/android-native-device-launch-2026-10-21.log`、`artifacts/being-native-device-portal-2026-10-21.png`、`artifacts/android-native-device-test-2026-10-21.log`。
+
+# Android Portal 原生能力与子模块（2026-10-21）
+
+- 前两批接入 13 个原生 MCP 工具：日历/联系人、提醒、时钟/拨号交接、分享、通知快捷回复、位置/地理围栏、五类 Health Connect，以及授权/操作记录。默认关闭，按 Being 分离读写授权与工作区。
+- Rust 适配已推送 `d5z/heart-portal` 的 `android-portal` 分支（`5cf3acb005e06d990a4157dd83a18b9ba4857554`）；主仓以 Git 子模块固定引用，无复制源码或补丁层。构建前运行 `git submodule update --init --recursive`。
+- 子模块 ARM64/x86_64 与正式包名 APK 构建通过；58 项 JVM 测试通过；Lint 0 errors、61 warnings；Windows Rust 323 passed、1 ignored；Android 16 模拟器 26 组端到端场景通过。签名、zipalign、16 KB ELF 对齐检查通过。
+- 真机安装时 USB/ADB 反复断开，本轮新增原生能力未完成 Redmi 验证，未覆盖正式 Being。地理围栏只完成注册失败回滚验证，真实到达/离开、OEM 后台长测和实际健康记录仍需设备验收。
+- 安装包：`artifacts/being-portal-debug.apk`；[能力与用法](docs/ANDROID-PORTAL-NATIVE.md)；[完整 Review、测试证据和验收边界](docs/ANDROID-PORTAL-NATIVE-REVIEW-2026-10-21.md)。下方记录均为各自时间点的历史结果。
+
+# Android Portal 真机补充验证（2026-10-21）
+
+- Redmi Note 14 Pro+ / Android 16 / API 36 / ARM64：独立 QA 应用和测试组件安装成功，11 组端到端测试全部通过，包含真实 HTTPS 获取、文件边界、后台回调、重连、崩溃恢复、受控重启及快速启停。
+- 使用上一轮构建产物，生产代码无新增变更；测试清理合成身份并停止服务，无残留 Portal 进程，未覆盖原 Being 应用或发送真实 Being 消息。
+- 日志：`artifacts/portal-device-instrumentation-2026-10-21.txt`；截图：`artifacts/portal-device-qa-2026-10-21.png`。真实 Being WSS 联调、OEM 后台长测及系统文件选择器等交互仍待验收。
+- 详细结果见 [Portal Review](docs/ANDROID-PORTAL-REVIEW-2026-10-20.md)。下方安装限制是前一日记录，现已解除并完成本次验证。
+
+# Android 内置 Portal（2026-10-20）
+
+- 参考 heart-portal/android-portal 和 HiddenFox/portal-android，内置固定版本 Rust 运行时，通过「更多 → 本机 Portal」启停；提供专用工作区、网页获取、可选 Shell、前台服务与重连恢复。
+- 最终 ARM64 / x86_64 Debug APK 构建通过；54 项 JVM 测试通过；Lint 0 errors、52 warnings；git diff --check 通过。
+- Android 16 x86_64 模拟器独立 QA 应用 11 组端到端验证通过：真实运行时/Service/relay/MCP、文件与边界、HTTPS 网页、断线重连、后台回调、命令超时、崩溃恢复、重启、停止、能力关闭与启动后立即停止。
+- Review 修复了 Android TOML 路径转义、能力关闭仍能直接调用、curl 不可用、前台服务快速启停超时及状态清理时序问题。实际截图复核通过。
+- Redmi 阻止 QA APK USB 安装，本轮没有完成真机运行验证；真实 Being WSS 联调、OEM 后台长测和部分系统 UI 交互仍未覆盖。没有发送真实 Being 消息。
+- 安装包：`artifacts/being-portal-debug.apk`；完整实现、复现命令、日志和验收边界见 [Portal Review](docs/ANDROID-PORTAL-REVIEW-2026-10-20.md)。
+
 # Android 提交前 Review（2026-10-20）
 
 - Review 范围：设置与社交页面布局、消息正文与菜单、流式分段与历史合并、回到底部协调器、输入框配色及相关测试。

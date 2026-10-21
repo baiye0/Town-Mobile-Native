@@ -21,4 +21,8 @@ iOS 最低支持 16.0（状态管理使用 ObservableObject / @Published，视�
 
 ## 边界
 
-前台实时连接不等于 APNs/FCM。无后台常驻、APNs/FCM 推送、实时语音或完整 Markdown 扩展。现已加入持久化发送队列、运行中流恢复、附件上传解析、本地通知、已有凭据验证导入与消息筛选。平台预览与原生交互界面仍有边界，见 MOBILE-PARITY.md。Portal/Grove/Kit 与 App 管理按要求排除。
+前台实时连接不等于 APNs/FCM。聊天无后台常驻、APNs/FCM 推送、实时语音或完整 Markdown 扩展；Android Portal 使用单独的前台服务。现已加入持久化发送队列、运行中流恢复、附件上传解析、本地通知、已有凭据验证导入与消息筛选。平台预览与原生交互界面仍有边界，见 MOBILE-PARITY.md。Android 已内置 Portal Rust 运行时，通过前台服务管理，详见 ANDROID-PORTAL.md；Grove、桌面 Kit 与 App 管理仍未加入。
+
+## Android Portal 原生桥接
+
+Rust 运行时通过 `android/portal-runtime/upstream` 子模块固定引用上游 Android 分支，适配直接维护在该分支。MCP、Relay、文件与进程核心继续共用；Kotlin 负责 Android 前台服务、系统权限、Provider、通知/定位回调与健康读取。随机鉴权的 loopback bridge 连接两层，原生工具不经 Shell。策略与工作区按 Being endpoint 隔离，提醒恢复由 JobScheduler 处理。详见 [原生能力](ANDROID-PORTAL-NATIVE.md)。
