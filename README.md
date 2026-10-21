@@ -34,6 +34,8 @@ Xcode 26 或更新版本打开 `ios/Town.xcodeproj`，scheme 为 `Town`；系统
 
 Android 内置 Portal 通过 Git 子模块引用 `d5z/heart-portal` 的 `android-portal` 分支。先执行 `git submodule update --init --recursive`；还需要 NDK `27.2.12479018`、Rust `1.90.0` 及 `aarch64-linux-android` / `x86_64-linux-android` target，按 [构建说明](docs/ANDROID-PORTAL.md) 安装。Gradle 从固定的子模块提交构建并打包运行时。
 
+GitHub CI 出包：打开仓库 **Actions → Android APK → Run workflow**；`codex/native-mobile` 的安卓/出包流程改动推送时也会自动触发。任务运行单元测试、Lint 和双 ABI Portal 构建，成功后在 **Artifacts → Being-Android-提交号** 下载 APK、SHA-256 和构建元数据（保留 30 天）。CI 仅使用 runner 自动生成的 Debug 签名，无需上传本机密钥，不安装到手机、不自动发布 Release。流程见 [android-apk.yml](.github/workflows/android-apk.yml)。
+
 ```sh
 swift test
 xcodebuild -project ios/Town.xcodeproj -scheme Town -sdk iphonesimulator \
