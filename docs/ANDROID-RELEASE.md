@@ -30,4 +30,4 @@ CI 核对标签、版本递增和发布说明，构建固定子模块中的双 A
 
 本次初始化的本机备份位于 `%USERPROFILE%\.android\being-release\`（仅当前用户和 SYSTEM 可访问）。不要把这个目录提交到仓库。
 
-正式版签名与本地/CI Debug 包不同，不能直接覆盖这些测试包。仓库目前为私有，Release 下载需要有访问权限的 GitHub 登录；应用当前使用匿名 GitHub API 检查更新，因此无法读取私有 Release。发布流程不会更改仓库可见性。
+正式版签名与本地/CI Debug 包不同，不能直接覆盖这些测试包。仓库公开后，Release APK 可直接通过浏览器下载，无需 GitHub 登录；应用也可通过匿名 GitHub API 读取最新正式 Release。发布工作流本身不修改仓库可见性。
