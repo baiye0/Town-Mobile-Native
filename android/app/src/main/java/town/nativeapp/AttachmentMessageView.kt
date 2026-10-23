@@ -51,7 +51,7 @@ import java.io.File
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
         // The user prompt is rendered by Chat as its own bubble, matching Muse.
         // Keep parsed attachment text in the assistant attachment card only.
-        if(message.role != "user") CompositionLocalProvider(LocalUIContext provides "${m.connection?.endpoint}|${message.sceneID}",LocalUIContinue provides {value->m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+value}){MarkdownText(text ?: if(refs.isEmpty())message.text.replace(NativeUI.context,"") else "附件消息",textColor=color)}
+        if(message.role != "user") CompositionLocalProvider(LocalUIContext provides "${m.connection?.endpoint}|${message.sceneID}",LocalUIContinue provides {value->m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+value}){GeneratedMessageText(text ?: if(refs.isEmpty())message.text.replace(NativeUI.context,"") else "附件消息",message,m,color)}
         files.forEach{file->
             val localEntry = m.outbox.firstOrNull { "local:${it.id}:user" == message.kind }
             val sourceFile = if(file.path.isNotEmpty()) file else message.files?.firstOrNull { it.attachmentID == file.attachmentID && it.path.isNotEmpty() } ?: file

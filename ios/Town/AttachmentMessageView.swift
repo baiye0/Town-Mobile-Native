@@ -37,7 +37,7 @@ struct AttachmentMessageView: View {
             // renders the original prompt in a separate conversation bubble.
             // Plain user messages still render their text in this shared view.
             if message.role != "user" || (message.files?.isEmpty != false && references.isEmpty) {
-                MarkdownText(text: text ?? (references.isEmpty ? message.text.replacingOccurrences(of: NativeUI.context, with: "") : "附件消息"), foreground: foreground, fillsWidth: false).environment(\.nativeUIScene, message.sceneID ?? "sbs")
+                GeneratedMessageText(text: text ?? (references.isEmpty ? message.text.replacingOccurrences(of: NativeUI.context, with: "") : "附件消息"), message: message, foreground: foreground).environment(\.nativeUIScene, message.sceneID ?? "sbs")
             }
             ForEach(files) { file in
                 if file.mime.hasPrefix("image/") {

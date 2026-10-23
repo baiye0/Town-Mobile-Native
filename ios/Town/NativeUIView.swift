@@ -92,7 +92,10 @@ struct NativeUIView: View {
             case "progress": Text(label); ProgressView(value: min(1,max(0,((NativeUI.evaluate(node["value"],values) as? NSNumber)?.doubleValue ?? 0) - lo) / max(1,hi-lo)))
             default:
                 if !label.isEmpty { Text(label).font(["heading","hero","section","card"].contains(type) ? .headline : .subheadline) }
-                if node["value"] != nil { Text(evaluated(node["value"])).font(type == "metric" ? .title2 : .body).textSelection(.enabled) }
+                if node["value"] != nil {
+                    if type == "metric" { Text(evaluated(node["value"])).font(.title2).textSelection(.enabled) }
+                    else { MarkdownText(text: evaluated(node["value"])) }
+                }
                 ForEach(Array(children.enumerated()), id: \.offset) { _, child in nodeView(child) }
             }
         }.frame(maxWidth: .infinity, alignment: .leading))

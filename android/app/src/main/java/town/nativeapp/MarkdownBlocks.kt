@@ -7,7 +7,7 @@ object MarkdownBlocks {
         for(c in line.trim()){if(escaped){cell.append(c);escaped=false;continue};if(c=='\\'){escaped=true;continue};if(c=='`')code=!code;if(c=='|'&&!code){result.add(cell.toString().trim());cell.clear()}else cell.append(c)}
         result.add(cell.toString().trim());if(result.firstOrNull()=="")result.removeAt(0);if(result.lastOrNull()=="")result.removeAt(result.lastIndex);return result
     }
-    fun parse(text:String):List<MarkdownBlock>{
+    fun parse(text:String, imageReferences:String=""):List<MarkdownBlock>{
         StructuredText.detect(text)?.let{return listOf(MarkdownBlock("code",text,label=it))}
         val lines=text.replace("\r\n","\n").split('\n');val blocks=mutableListOf<MarkdownBlock>();val paragraph=mutableListOf<String>();var i=0
         fun flush(){if(paragraph.isNotEmpty()){blocks.add(MarkdownBlock("paragraph",paragraph.joinToString("\n")));paragraph.clear()}}
@@ -23,6 +23,6 @@ object MarkdownBlocks {
             val list=Regex("""^(\s*)([-+*]|[0-9]+[.)])\s+(.+)$""").find(line)
             if(list!=null){flush();var label=if(list.groupValues[2].length==1)"•" else list.groupValues[2];var content=list.groupValues[3];if(content.startsWith("[ ] ")){label="☐";content=content.drop(4)};if(content.lowercase().startsWith("[x] ")){label="☑";content=content.drop(4)};blocks.add(MarkdownBlock("list",content,list.groupValues[1].length/2,label));i++;continue}
             paragraph.add(line);i++
-        };flush();return blocks
+        };flush();return MarkdownImages.expand(blocks, imageReferences)
     }
 }

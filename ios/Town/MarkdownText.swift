@@ -5,11 +5,13 @@ struct MarkdownText: View {
     var previewMarkdownCode = true
     var foreground:Color? = nil
     var fillsWidth = true
+    var imageReferences = ""
     private func inline(_ text:String) -> Text { Text(MarkdownRenderCache.inline(text)) }
     var body: some View {
         VStack(alignment:.leading,spacing:8) {
-            ForEach(Array(MarkdownRenderCache.blocks(text).enumerated()),id:\.offset) { _,block in
+            ForEach(Array(MarkdownRenderCache.blocks(text, imageReferences: imageReferences).enumerated()),id:\.offset) { _,block in
                 switch block.kind {
+                case .image: RemoteImage(image: ChatImage(url: block.text, label: block.label))
                 case .paragraph: inline(block.text).font(.system(size:readingSize)).lineSpacing(7).textSelection(.enabled)
                 case .heading: inline(block.text).font(.system(size:block.level == 1 ? 20 : block.level == 2 ? 18 : 16,weight:.semibold)).padding(.top,8).textSelection(.enabled)
                 case .list:
@@ -77,7 +79,8 @@ struct NativeCodeBlock: View {
         inlineCache.setObject(InlineEntry(value), forKey: text as NSString, cost: text.utf8.count * 2)
         return value
     }
-    static func blocks(_ text: String) -> [MarkdownBlock] {
+    static func blocks(_ text: String, imageReferences: String = "") -> [MarkdownBlock] {
+        if !imageReferences.isEmpty { return MarkdownBlocks.parse(text, imageReferences: imageReferences) }
         if let entry = cache.object(forKey: text as NSString) { return entry.blocks }
         let blocks = MarkdownBlocks.parse(text)
         cache.setObject(Entry(blocks), forKey: text as NSString, cost: text.utf8.count * 2)

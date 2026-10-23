@@ -1,6 +1,6 @@
 import Foundation
 public struct MarkdownBlock: Equatable {
-    public enum Kind { case paragraph, heading, code, quote, list, rule, table }
+    public enum Kind { case paragraph, heading, code, quote, list, rule, table, image }
     public var kind: Kind
     public var text: String
     public var level: Int = 0
@@ -24,7 +24,7 @@ public enum MarkdownBlocks {
         if result.first == "" { result.removeFirst() }; if result.last == "" { result.removeLast() }
         return result
     }
-    public static func parse(_ text: String) -> [MarkdownBlock] {
+    public static func parse(_ text: String, imageReferences: String = "") -> [MarkdownBlock] {
         if let language = StructuredText.detect(text) { return [MarkdownBlock(kind:.code,text:text,label:language)] }
         let lines = text.replacingOccurrences(of:"\r\n",with:"\n").components(separatedBy:"\n")
         var blocks:[MarkdownBlock] = [], paragraph:[String] = [], i = 0
@@ -53,6 +53,6 @@ public enum MarkdownBlocks {
             }
             paragraph.append(line);i += 1
         }
-        flush();return blocks
+        flush();return MarkdownImages.expand(blocks, definitions: imageReferences)
     }
 }

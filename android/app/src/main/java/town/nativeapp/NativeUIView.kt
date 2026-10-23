@@ -69,7 +69,7 @@ val LocalUIContinue=staticCompositionLocalOf<(String)->Unit>{{}}
             }
             "table","facts"->{if(label.isNotEmpty())Text(label,style=MaterialTheme.typography.titleSmall);Column(Modifier.horizontalScroll(rememberScrollState())){val columns=node.optJSONArray("columns") ?: JSONArray();Row{for(i in 0 until columns.length())Text(columns.optString(i),Modifier.width(130.dp),style=MaterialTheme.typography.titleSmall)};val rows=node.optJSONArray("rows") ?: JSONArray();for(i in 0 until rows.length()){val row=rows.optJSONArray(i) ?: JSONArray();Row{for(j in 0 until row.length())Text(value(row.opt(j)),Modifier.width(130.dp))}}}}
             "progress"->{Text(label);val v=(NativeUI.evaluate(node.opt("value"),values) as? Number)?.toDouble() ?: 0.0;LinearProgressIndicator(progress={((v-lo)/maxOf(1.0,hi-lo)).coerceIn(0.0,1.0).toFloat()})}
-            else->{if(label.isNotEmpty())Text(label,style=MaterialTheme.typography.titleSmall);if(node.has("value"))Text(value(node.get("value")),style=if(type=="metric")MaterialTheme.typography.headlineSmall else MaterialTheme.typography.bodyMedium);node.rows("children").forEach{NativeUINode(it,values,set,action)}}
+            else->{if(label.isNotEmpty())Text(label,style=MaterialTheme.typography.titleSmall);if(node.has("value")){if(type=="metric")Text(value(node.get("value")),style=MaterialTheme.typography.headlineSmall) else MarkdownText(value(node.get("value")))};node.rows("children").forEach{NativeUINode(it,values,set,action)}}
         }
     }
 }

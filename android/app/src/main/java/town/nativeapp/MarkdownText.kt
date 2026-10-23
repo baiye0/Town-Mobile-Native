@@ -29,12 +29,13 @@ private fun inlineText(value:String)=buildAnnotatedString {
         last=m.range.last+1
     };append(value.substring(last))
 }
-@Composable fun MarkdownText(text:String,previewMarkdownCode:Boolean=true,textColor:androidx.compose.ui.graphics.Color=MaterialTheme.colorScheme.onSurface){
+@Composable fun MarkdownText(text:String,previewMarkdownCode:Boolean=true,textColor:androidx.compose.ui.graphics.Color=MaterialTheme.colorScheme.onSurface,imageReferences:String=""){
     val size=readingSize()
     val clipboard=LocalClipboardManager.current
-    val blocks=androidx.compose.runtime.remember(text){MarkdownBlocks.parse(text)}
+    val blocks=androidx.compose.runtime.remember(text,imageReferences){MarkdownBlocks.parse(text,imageReferences)}
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
         blocks.forEach{b->when(b.kind){
+            "image"->RemoteImage(ChatImage(b.text,b.label))
             "rule"->HorizontalDivider()
             "code"->if(b.label.lowercase()=="intelligent-ui")NativeUIView(b.text) else NativeCodeBlock(b.text,b.label,previewMarkdownCode)
             "table"->Column(Modifier.horizontalScroll(rememberScrollState())){b.rows.forEachIndexed{index,row->
