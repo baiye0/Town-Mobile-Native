@@ -31,13 +31,15 @@ struct AdvancedPairing: View {
     @State private var task: Task<Void,Never>?
     var body: some View {
         DisclosureGroup("导入已有 Town 凭据") {
-            TextField("Town ID 或 Being 名", text:$id).textInputAutocapitalization(.never).autocorrectionDisabled()
-            SecureField("Town client token", text:$token).textInputAutocapitalization(.never).autocorrectionDisabled()
-            Button(busy ? "正在验证…" : "验证并导入") {
-                busy = true; error = nil
-                task = Task { defer { busy = false }; do { try await social.importIdentity(id:id.trimmingCharacters(in:.whitespacesAndNewlines),token:token.trimmingCharacters(in:.whitespacesAndNewlines)); token = "" } catch { if !Task.isCancelled { self.error = error.localizedDescription } } }
-            }.disabled(busy || id.isEmpty || token.isEmpty)
-            if let error { Text(error).foregroundStyle(.red).font(.caption) }
+            VStack(alignment: .leading, spacing: 14) {
+                TextField("Town ID 或 Being 名", text:$id).textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                SecureField("Town client token", text:$token).textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                Button(busy ? "正在验证…" : "验证并导入") {
+                    busy = true; error = nil
+                    task = Task { defer { busy = false }; do { try await social.importIdentity(id:id.trimmingCharacters(in:.whitespacesAndNewlines),token:token.trimmingCharacters(in:.whitespacesAndNewlines)); token = "" } catch { if !Task.isCancelled { self.error = error.localizedDescription } } }
+                }.buttonStyle(SettingsActionStyle()).disabled(busy || id.isEmpty || token.isEmpty)
+                if let error { Text(error).foregroundStyle(.red).font(.caption) }
+            }.padding(.top, 14)
         }.onDisappear { task?.cancel() }
     }
 }

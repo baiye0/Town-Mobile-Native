@@ -1,3 +1,69 @@
+# iOS 提交前 Review（2026-10-21）
+
+- Review 覆盖本轮布局、侧栏、Markdown 图片、统一图片预览、智能界面宿主、上下文展示过滤和发送队列集成；Android 与 Portal 未修改。
+- 修复对话切换时用“有无选择”推断智能 UI 开关的问题：开关按 Being/场景独立保存，保留用户显式开启和关闭的意图。状态回归覆盖无选择时开启、有选择时关闭、往返切换和重选当前场景。
+- 修复大写 `INTELLIGENT-UI` 围栏显示正常却未参与 surface 历史与选择回传的问题；完整交互用例改用大写初始围栏，验证刷新恢复、当前选择发送和后续小写 patch 更新。
+- 本轮 Swift Core **63 项**、Node 协议 **3 项**、iOS 26.5 状态 **4 项**及智能界面交互 **1 项**通过。Web 重新构建后所有生成资源与已上传构建 6 的源码清单一致；vendor 文件校验清单一致，`git diff --check` 通过。
+- 证据：`artifacts/ios-review-core-20261021.log`、`artifacts/ios-review-protocol-20261021.log`、`artifacts/ios-review-web-build-20261021.log`、`artifacts/ios-review-state-20261021.xcresult`、`artifacts/ios-review-ui-20261021.xcresult`。图片保存、缩放和其他布局沿用下方已通过的验收，本轮未重复运行全部 UI 或 iOS 16.4 回归。
+- 以上两处 Review 修复在 TestFlight 构建 6 上传之后完成，仅提交源码；已上传包仍对应其归档及 SHA-256 清单。
+
+# TestFlight 0.1.0 (6)（2026-10-21）
+
+- 用户重新要求提交后，上传已验证的最终 Release 归档；网络中断自动重试后，17:33:22 返回上传成功，命令退出 0。
+- 通过 Chrome 保存测试说明并向现有外部 d5 群组提交审核。最终页面显示 **0.1.0 (6) 正在测试**，关联内部和外部 d5 群组；可通过原 TestFlight 链接安装更新。
+- 日志与网页凭证：`artifacts/testflight/upload-0.1.0-6-20261021-resumed.log`、`artifacts/testflight/submitted-0.1.0-6-20261021.png`。本次复用已验证产物，未再次修改代码或重复运行测试，详见 [发布记录](docs/TESTFLIGHT-0.1.0.md)。
+
+# iPhone 图片与智能界面更新（2026-10-21）
+
+- 按用户要求停止 TestFlight 上传，改用 Xcode Debug 真机构建，覆盖安装到已连接的 iPhone 16 Pro Max，未卸载或清除应用数据。
+- CoreDevice 确认 `town.beings.nativeapp` 已安装为 **0.1.0 (6)**，安装与启动均返回 success（17:09–17:10）。真机本轮验证为构建、覆盖安装和启动；交互回归来自前述独立 iOS 26.5 模拟器，不表述为真机完整验收。
+- 证据：`artifacts/ios-image-ui-device-build.log`、`artifacts/ios-image-ui-device-install.json`、`artifacts/ios-image-ui-device-app.json`、`artifacts/ios-image-ui-device-launch.json`。
+- 当时按要求终止 TestFlight 上传（退出 143）；用户随后重新要求提交，已完成上传与外测分发，见上方记录。
+
+# 图片预览与桌面智能界面兼容（2026-10-21）
+
+- 附件、Markdown 和智能界面图片使用统一全屏预览：双指缩放、双击放大、拖动、适合屏幕、保存到相册、文件导出和分享；导出保留原始字节，显示解码限制为最长边 4096 像素。
+- 聊天展示隐藏完整的客户端能力、当前选择及界面操作上下文；原始历史不改写，代码示例和未闭合内容不误删。发送队列单独持久化界面选择，发送身份核对仍区分不同选择。
+- iOS 内置桌面 MIT 渲染器，支持 tabs、diagram、图片、隔离 Worker 本地 app、跨轮 patch、版本冲突校验与回看。提供原生全屏入口；状态按 Being/场景隔离，以 JSON 保存协议空值；继续操作只填草稿。
+- Swift Core 63 项、Node 协议 3 项、iOS 状态 3 项通过。iOS 26.5 图片 UI 用例通过真实双击/双指手势、系统文件导出、相册授权与保存、刷新历史和签名 URL 请求校验。智能界面用例已验证步进器、标签、选择持久化、带选择发送和跨轮 patch。
+- 最终两项智能界面 UI 回归通过：标签、步进器、刷新与持久化、隐藏上下文及带选择发送、跨轮 patch、图解选择、原生图片预览、隔离 Worker 的本地计算及事件更新。全屏时移除对应内嵌渲染实例，选中标签对比度及 44 pt 操作区域已调整，截图复核通过。
+- 证据：`artifacts/image-ui-core.log`、`artifacts/iui-protocol-tests.log`、`artifacts/image-ui-regression6.xcresult`（状态 3 项与图片 UI 通过；旧图解定位失败）、`artifacts/image-ui-verified.xcresult`（最终智能界面 2 项、0 failures），截图位于对应 `*-screens/`。
+- 本轮未完成 iOS 16.4 UI 回归；Release 最低部署目标为 iOS 16.0。测试使用独立模拟器和 loopback 数据，不向真实 Being 发送对话。
+
+# TestFlight 0.1.0 (5)（2026-10-21）
+
+- Markdown 图片及侧栏遮罩修复完成 Release 归档、签名检查和上传（16:01:21）。通过 Chrome 保存测试说明并向现有外部 d5 群组提交审核，App Store Connect 最终显示“已批准”，关联内部、外部两个 d5 群组。
+- 最终 IPA、归档、源码清单、日志与网页截图位于 `artifacts/testflight/`，详见 [发布记录](docs/TESTFLIGHT-0.1.0.md)。本次未重新覆盖安装 USB 真机。
+
+# Markdown 图片与侧栏遮罩回归（2026-10-21）
+
+- 对话正文支持内联 Markdown 图片，保留前后文字、签名查询参数和重定向；提供加载状态、失败重试及点击预览。流式回复尚未完整的图片语法保留为文本，行内代码中的图片语法不加载图片。
+- 侧栏关闭时移除透明遮罩，修复遮罩仍影响主界面点击的问题。
+- Swift Core 59 项通过（含 4 项新图片解析测试）。iOS 26.5 两项 UI 回归通过：图片分段到达、失败重试、预览、刷新历史、请求不带应用鉴权，以及侧栏连续三次开关与搜索键盘收起。导出截图已复核。
+- iOS 16.4 本轮 UI runner 在进入测试前卡于系统 dylib 加载，未完成本轮图片 UI 回归，不记为通过。最低部署版本仍为 iOS 16.0。
+- 证据：`artifacts/markdown-images-core.log`、`artifacts/ios-markdown-images-overlay.xcresult`、`artifacts/ios-markdown-images-screens/`；runner 采样：`artifacts/markdown-runner-sample.txt`。
+
+# TestFlight 0.1.0 (4)（2026-10-21）
+
+- 最新 iOS 布局与侧栏修复完成 Release 归档、签名校验和上传（15:29:36）。通过 Chrome 填写测试说明并向既有外部 d5 群组提交，App Store Connect 最终显示“已批准”，构建关联内部、外部两个 d5 群组。
+- 本地 IPA 与归档、上传日志及网页截图保存在 `artifacts/testflight/`，详见 [发布记录](docs/TESTFLIGHT-0.1.0.md)。Markdown 图片语法暂不展示图片的现有限制已写入测试说明。
+
+# iOS 真机覆盖安装（2026-10-21）
+
+- 当前 UI 布局与侧栏动画修复通过 Xcode Debug 真机构建和自动签名，已覆盖安装至 USB 连接的 iPhone 16 Pro Max（iOS 27.0），保留应用数据；CoreDevice 返回安装与启动成功。
+- 本轮为构建、安装及启动验证，未将模拟器 UI 回归结果视为 iOS 27 真机完整回归。日志：`artifacts/ios-device-layout-build.log`、`artifacts/ios-device-layout-install.json`、`artifacts/ios-device-layout-launch.json`。
+
+# iOS 布局对齐 Android（2026-10-21）
+
+- “更多”改为连接卡片、设置分组和小镇入口网格；连接、模型、外观、通知、字号、配对与更新页面统一卡片和间距，底部导航增加文字标签。未接入 Android Portal 能力。
+- 篝火、围炉、私信采用紧凑操作栏；搜索、关系、时间、排序及加载数量移入筛选弹层，私信用胶囊入口切换信箱，公告改为单行轮播，消息列表保留展开、回复、分享和下拉刷新。
+- Debug 模拟器构建通过。iOS 26.5 隔离模拟器验证设置与主题、关闭玻璃效果、大字号、历史阅读位置及回到底部、社交筛选与重置、收发信箱、筛选后的围炉详情、长消息展开、公告列表和详情返回。iOS 16.4 / iPhone SE 验证设置、连接弹窗与社交筛选布局。
+- 截图复核覆盖浅色、深色、小屏、大字号、三类社交首屏和筛选弹层。修复公告空视图未触发首次加载、轮播条目/筛选围炉的跳转身份及公告弹层内导航作用域。
+- 社交测试通过仅 Debug 模拟器可用的内存 fixture 运行，不保存配对身份、不向 Town 发送消息。聊天验证使用已有 loopback fixture。真实账号的发送、模型修改及配对流程不属于本轮 UI 验收。
+- 日志与证据：`artifacts/ios-layout-social.log`、`artifacts/ios-layout-small-screen.log`、`artifacts/ios-layout-social-small.log`、`artifacts/ios-layout-final-navigation.log` 及对应 `.xcresult`；预览 `artifacts/ios-layout-preview.png`。
+- 侧栏关闭改用明确的向左移出过渡，替换条件视图默认淡出；遮罩随进度消退，关闭时取消搜索焦点。iOS 26.5 验证草稿保留，iOS 26.5 与 iOS 16.4 小屏均通过连续三次开关与键盘收起；录屏抽帧确认移出后无侧栏残留。证据：`artifacts/ios-layout-sidebar-slide.xcresult`（草稿用例）、`artifacts/ios-layout-sidebar-small.xcresult`、`artifacts/ios-layout-sidebar-verified.xcresult`、`artifacts/ios-sidebar-slide.mp4`。
+- 新版已覆盖安装到用户正在查看的 Town iOS Compatibility QA 模拟器，保留应用数据。未修改 Android 源码。
+
 # Android Portal 提交前 Review 与出包（2026-10-21）
 
 - 本轮 Review 修复三处问题：桥接鉴权读取采用总时限避免慢速连接长期占用线程；写操作在获得排队锁后重新检查身份和策略，缓存重试也受检查；待处理操作达到上限时淘汰已结束历史，保留待处理项。

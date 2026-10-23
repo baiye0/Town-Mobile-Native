@@ -1,8 +1,38 @@
 # Being Town 0.1.0 TestFlight
 
-日期：2026-10-20（Asia/Shanghai）。
+日期：2026-10-21（Asia/Shanghai）。
 
-## 当前构建：0.1.0 (3)
+## 当前构建：0.1.0 (6)
+
+提交前 Review 随后修复了智能 UI 开关的场景恢复及大写围栏历史识别；这两处源码修复尚未重新出包，不包含在下述构建 6 中。回归结果见 `TESTING.md` 顶部。
+
+- **2026-10-21 17:33:22** 上传成功，Xcode 返回 `Uploaded package is processing`、`Upload succeeded` 与 `EXPORT SUCCEEDED`，退出码 0。传输期间出现一次网络连接中断，自动重试后成功。
+- 已通过 Chrome 保存简体中文测试说明，向现有外部 `d5` 群组提交 Beta 审核。最终页面显示 **0.1.0 (6) 正在测试**，关联内部和外部两个 `d5` 群组，保留自动通知。外测链接：https://testflight.apple.com/join/tbMC57cD 。
+- 包含图片缩放、原图保存与桌面智能界面兼容，回归记录见 `TESTING.md`。Xcode Debug 构建此前已覆盖安装到用户 iPhone 16 Pro Max，设备确认 0.1.0 (6)，安装与启动成功。
+- 本地最终归档：`artifacts/testflight/Being-0.1.0-6-20261021-final.xcarchive`；IPA：`artifacts/testflight/ipa-0.1.0-6-20261021-final/Town.ipa`。签名校验通过，二进制与 dSYM UUID 均为 `1DC3D543-0B8A-35A2-BCB8-A3911C977F77`，最低系统 iOS 16.0。
+- 用户此前要求暂停上传并先装真机，原上传进程退出 143；随后明确要求提交 TestFlight。恢复前 Chrome 确认 Apple 构建及上传记录均无构建 6，因此重新上传同一份已验证归档。
+- 成功上传日志：`artifacts/testflight/upload-0.1.0-6-20261021-resumed.log`；网页凭证：`artifacts/testflight/submitted-0.1.0-6-20261021.png`。源码清单、校验结果及已保存的测试说明分别为同目录下的 `source-sha256-0.1.0-6-20261021.json`、`verification-0.1.0-6-20261021.json`、`what-to-test-0.1.0-6-zh.txt`。
+
+## 此前构建：0.1.0 (5)
+
+- **2026-10-21 16:01:21** 上传成功，Xcode 返回 `Uploaded package is processing`、`Upload succeeded` 与 `EXPORT SUCCEEDED`。
+- 修复对话正文中的 Markdown 图片展示，支持流式回复、历史刷新、签名参数、重定向、失败重试与点击预览；修复侧栏关闭后透明遮罩阻挡主界面点击。
+- Swift Core 59 项、iOS 26.5 两项 UI 回归通过，截图已复核。iOS 16.4 本轮 runner 在系统 dylib 加载阶段卡住，未完成图片 UI 回归。详细验证范围见 `TESTING.md`。
+- Release 最终归档与签名验证通过；最低系统 iOS 16.0，二进制与 dSYM UUID 均为 `0BE24A60-D6E6-35DF-88F1-ABD22BA7756D`。
+- 最终归档：`artifacts/testflight/Being-0.1.0-5-20261021-final.xcarchive`；本地 IPA：`artifacts/testflight/ipa-0.1.0-5-20261021-final/Town.ipa`。带 `final` 的产物包含侧栏遮罩修复；先前同版本本地归档未上传。
+- 上传日志：`artifacts/testflight/upload-0.1.0-5-20261021.log`；源码清单：`artifacts/testflight/source-sha256-0.1.0-5-20261021.json`；测试说明：`artifacts/testflight/what-to-test-0.1.0-5-zh.txt`。
+- 已通过 Chrome 保存简体中文测试说明，并向现有外部 `d5` 群组提交 Beta 审核。网页最终显示构建 5 **已批准**，关联内部和外部两个 `d5` 群组。截图：`artifacts/testflight/approved-0.1.0-5-20261021.png`。
+
+## 此前构建：0.1.0 (4)
+
+- **2026-10-21 15:29:36** 上传成功，Xcode 返回 `Uploaded package is processing`、`Upload succeeded` 与 `EXPORT SUCCEEDED`。
+- 包含篝火、围炉、私信、设置页布局调整，公告与筛选导航修复，以及侧栏关闭残影和搜索焦点修复；未接入 Android Portal。
+- Release 归档与签名验证通过；版本为 `0.1.0 (4)`，最低系统 iOS 16.0，二进制与 dSYM UUID 一致，包含隐私声明，不含 XCTest。此前 UI 回归及真机安装记录见 `TESTING.md`。
+- 上传归档：`artifacts/testflight/Being-0.1.0-4-20261021.xcarchive`；上传日志：`artifacts/testflight/upload-0.1.0-4-20261021.log`；源码清单：`artifacts/testflight/source-sha256-0.1.0-4-20261021.json`。
+- 已通过 Chrome 保存简体中文测试说明并向现有外部 `d5` 群组提交 Beta 审核。网页最终显示构建 4 **已批准**，关联内部和外部 `d5` 两个群组；未新增测试员或修改公开链接。截图：`artifacts/testflight/approved-0.1.0-4-20261021.png`。
+- 本地 App Store IPA：`artifacts/testflight/ipa-0.1.0-4-20261021/Town.ipa`。已知 Markdown 图片语法尚未实现图片展示，已写入测试说明；图片附件仍可预览。
+
+## 此前构建：0.1.0 (3)
 
 - **2026-10-20 15:00:04** 上传成功：Xcode 日志明确返回 `Uploaded package is processing`、`Upload succeeded`、`Uploaded Town`、`EXPORT SUCCEEDED`，退出码 0。
 - 包含本次对话流、实时正文与思考过程、历史确认后过程更新、输入框聚焦定位、输入栏间距及相机全屏修复。最低系统仍为 **iOS 16.0**。

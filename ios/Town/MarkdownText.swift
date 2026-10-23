@@ -6,12 +6,31 @@ struct MarkdownText: View {
     var foreground:Color? = nil
     var fillsWidth = true
     var imageReferences = ""
-    private func inline(_ text:String) -> Text { Text(MarkdownRenderCache.inline(text)) }
+    @ViewBuilder private func inline(_ text: String) -> some View {
+        let parts = MarkdownImages.parse(text)
+        if parts.count == 1, case .text(let plain) = parts[0] {
+            Text(MarkdownRenderCache.inline(plain))
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(parts.enumerated()), id: \.offset) { _, part in
+                    switch part {
+                    case .text(let text):
+                        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(MarkdownRenderCache.inline(text))
+                        }
+                    case .image(let alt, let url): MarkdownImageView(alt: alt, url: url)
+                    }
+                }
+            }
+        }
+    }
     var body: some View {
         VStack(alignment:.leading,spacing:8) {
             ForEach(Array(MarkdownRenderCache.blocks(text, imageReferences: imageReferences).enumerated()),id:\.offset) { _,block in
                 switch block.kind {
-                case .image: RemoteImage(image: ChatImage(url: block.text, label: block.label))
+                case .image:
+                    if let url = URL(string: block.text), ["https", "http"].contains(url.scheme?.lowercased() ?? "") { MarkdownImageView(alt: block.label, url: url) }
+                    else { RemoteImage(image: ChatImage(url: block.text, label: block.label)) }
                 case .paragraph: inline(block.text).font(.system(size:readingSize)).lineSpacing(7).textSelection(.enabled)
                 case .heading: inline(block.text).font(.system(size:block.level == 1 ? 20 : block.level == 2 ? 18 : 16,weight:.semibold)).padding(.top,8).textSelection(.enabled)
                 case .list:

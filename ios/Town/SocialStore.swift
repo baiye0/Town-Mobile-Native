@@ -25,10 +25,18 @@ func field(_ record: [String: Any], _ names: String...) -> String {
     var seen: Set<String> = []
     private var live: Task<Void, Never>?
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
+    init() {
+        #if DEBUG && targetEnvironment(simulator)
+        if SocialLayoutFixture.enabled { identity = SocialLayoutFixture.identity; status = "布局预览" }
+        #endif
+    }
     func unread(_ destination: Destination) -> Int { counts[destination.rawValue] ?? 0 }
     func acknowledge(_ kind: Destination) { counts[kind.rawValue] = 0 }
     func request(_ path: String, privateRoute: Bool = true, body: [String: Any]? = nil) async throws -> [String: Any] {
         guard path.hasPrefix("/api") else { throw PortalError.invalidResponse }
+        #if DEBUG && targetEnvironment(simulator)
+        if SocialLayoutFixture.enabled { return try SocialLayoutFixture.response(path, body: body) }
+        #endif
         let credential = identity
         if privateRoute && credential == nil { throw PortalError.server("请先配对小镇身份。") }
         var req = URLRequest(url: URL(string: "https://beings.town" + path)!); req.timeoutInterval = 20
@@ -63,6 +71,9 @@ func field(_ record: [String: Any], _ names: String...) -> String {
     func unpair() { stopLive(); try? TownVault.save(nil); identity = nil; counts = [:]; seen = []; status = "尚未配对"; revision += 1 }
     func stopLive() { live?.cancel(); live = nil }
     func startLive() {
+        #if DEBUG && targetEnvironment(simulator)
+        if SocialLayoutFixture.enabled { return }
+        #endif
         stopLive(); guard let credential = identity else { return }
         live = Task {
             var attempts = 0

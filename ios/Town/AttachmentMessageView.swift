@@ -13,8 +13,7 @@ struct AttachmentMessageView: View {
     @State private var text: String?
     @State private var error: String?
     @State private var preview: URL?
-    @State private var previewImage: UIImage?
-    @State private var imageURL: URL?
+    @State private var imagePreview: ImagePreviewItem?
     @State private var remoteImages: [String: UIImage] = [:]
     @State private var remoteFiles: [String: URL] = [:]
     @State private var failedImages: Set<String> = []
@@ -37,7 +36,7 @@ struct AttachmentMessageView: View {
             // renders the original prompt in a separate conversation bubble.
             // Plain user messages still render their text in this shared view.
             if message.role != "user" || (message.files?.isEmpty != false && references.isEmpty) {
-                GeneratedMessageText(text: text ?? (references.isEmpty ? message.text.replacingOccurrences(of: NativeUI.context, with: "") : "附件消息"), message: message, foreground: foreground).environment(\.nativeUIScene, message.sceneID ?? "sbs")
+                GeneratedMessageText(text: text.map { ClientUIContext.strip($0) } ?? (references.isEmpty ? ClientUIContext.strip(message.text) : "附件消息"), message: message, foreground: foreground).environment(\.nativeUIScene, message.sceneID ?? "sbs").environment(\.nativeUIMessage, message.id.uuidString)
             }
             ForEach(files) { file in
                 if file.mime.hasPrefix("image/") {
@@ -84,31 +83,7 @@ struct AttachmentMessageView: View {
         .task(id: loadIdentity) { await load() }
         .task(id: files.map { "\($0.id)|\($0.attachmentID ?? "")|\($0.path)" }.joined(separator: ",")) { await loadRemoteImages() }
             .quickLookPreview($preview)
-            .sheet(isPresented: Binding(get: { previewImage != nil }, set: { if !$0 { previewImage = nil } })) {
-                ZStack(alignment: .topTrailing) {
-                    Color.black.ignoresSafeArea()
-                    if let previewImage {
-                        Image(uiImage: previewImage).resizable().scaledToFit()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .ignoresSafeArea(.container, edges: .all)
-                    }
-                    HStack {
-                    if let imageURL {
-                        ShareLink(item: imageURL) {
-                            Image(systemName: "square.and.arrow.up").font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(.white).frame(width: 44, height: 44)
-                                .background(.black.opacity(0.65), in: Circle())
-                        }.accessibilityLabel("保存或分享图片")
-                    }
-                    Button { previewImage = nil } label: {
-                        Image(systemName: "xmark").font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(.white).frame(width: 44, height: 44)
-                            .background(.black.opacity(0.65), in: Circle())
-                    }.buttonStyle(.plain).accessibilityLabel("关闭图片")
-                    }.padding(16)
-                }
-                .beingPresentationBackground(.black)
-            }
+            .fullScreenCover(item: $imagePreview) { ImagePreview(item: $0) }
     }
     private func localImage(_ file: PendingAttachment) -> UIImage? {
         guard let local = resolvedLocalFile(file), local.mime.hasPrefix("image/") else { return nil }
@@ -181,9 +156,9 @@ struct AttachmentMessageView: View {
         working = true; error = nil; defer { working = false }
         do {
             let url = try await mediaURL(file)
-            if file.mime.hasPrefix("image/"), let image = UIImage(contentsOfFile: url.path) {
+            if file.mime.hasPrefix("image/"), thumbnail(url) != nil {
                 remoteFiles[file.id] = url; remoteImages[file.id] = thumbnail(url)
-                failedImages.remove(file.id); imageURL = url; previewImage = image
+                failedImages.remove(file.id); imagePreview = ImagePreviewItem(url: url, title: "图片")
             }
             else {
                 let directory = URL.cachesDirectory.appending(path: "previews/" + UUID().uuidString, directoryHint: .isDirectory)

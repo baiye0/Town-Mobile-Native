@@ -12,25 +12,39 @@ struct ModelSettingsView: View {
     @State private var saving = false
     @State private var result: String?
     var body: some View {
-        Form {
-            if store.connection == nil { BeingEmptyState("请先连接 Being 对话。", systemImage: "link", description: Text("选择当前 Being 使用的模型")) }
-            else {
-                Section("模型") {
-                    if routes.isEmpty { TextField("服务商 / 线路 ID", text: $provider).textInputAutocapitalization(.never) }
-                    else { Picker("线路", selection: $provider) { Text("选择线路").tag(""); ForEach(routes) { Text($0.name).tag($0.id) } } }
-                    if !models.isEmpty { Picker("模型目录", selection: $model) { Text("自定义模型").tag(model); ForEach(models.filter { $0.id != model }) { Text($0.name).tag($0.id) } } }
-                    TextField("模型 ID", text: $model).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Picker("思考深度", selection: $thinking) { ForEach(["off", "low", "medium", "high"], id: \.self) { Text(["off":"关闭","low":"低","medium":"中","high":"高"][$0] ?? $0).tag($0) } }
+        SettingsPage {
+            if store.connection == nil {
+                SettingsSection(title: "模型设置", icon: "cpu") {
+                    BeingEmptyState("请先连接 Being 对话。", systemImage: "link", description: Text("选择当前 Being 使用的模型"))
+                    HistoryLink { BeingConnectionView() } label: { Text("连接 Being") }.buttonStyle(SettingsActionStyle())
                 }
-                Section { SecureField("输入 API 密钥", text: $apiKey).textInputAutocapitalization(.never).autocorrectionDisabled() } header: { Text("线路凭据") }
-                Section {
-                    Button(saving ? "正在保存…" : "保存配置") { Task { await save() } }.disabled(saving || loading || store.busy || provider.isEmpty || model.isEmpty)
-                    Button("重新读取") { Task { await load() } }.disabled(saving || loading)
-                    if loading { ProgressView() }
-                    if let result { Text(result).font(.footnote).textSelection(.enabled) }
+            } else {
+                SettingsSection(title: "模型", icon: "cpu") {
+                    if routes.isEmpty {
+                        TextField("服务商 / 线路 ID", text: $provider).textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                    } else {
+                        Picker("线路", selection: $provider) { Text("选择线路").tag(""); ForEach(routes) { Text($0.name).tag($0.id) } }
+                    }
+                    if !models.isEmpty {
+                        Picker("模型目录", selection: $model) { Text("自定义模型").tag(model); ForEach(models.filter { $0.id != model }) { Text($0.name).tag($0.id) } }
+                    }
+                    TextField("模型 ID", text: $model).textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                    Picker("思考深度", selection: $thinking) {
+                        ForEach(["off", "low", "medium", "high"], id: \.self) { Text(["off":"关闭","low":"低","medium":"中","high":"高"][$0] ?? $0).tag($0) }
+                    }
+                }.pickerStyle(.menu)
+                SettingsSection(title: "线路凭据", icon: "key") {
+                    SecureField("输入 API 密钥", text: $apiKey).textInputAutocapitalization(.never).autocorrectionDisabled().settingsInput()
+                    SettingsNote(text: "留空将保留当前线路的密钥。")
                 }
+                Button(saving ? "正在保存…" : "保存配置") { Task { await save() } }
+                    .buttonStyle(SettingsActionStyle()).disabled(saving || loading || store.busy || provider.isEmpty || model.isEmpty)
+                Button("重新读取") { Task { await load() } }
+                    .buttonStyle(SettingsActionStyle(prominent: false)).disabled(saving || loading)
+                if loading { ProgressView().frame(maxWidth: .infinity) }
+                if let result { Text(result).font(.footnote).textSelection(.enabled) }
             }
-        }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("模型设置").task { await load() }.task(id: provider) { await catalog() }
+        }.navigationTitle("模型设置").task { await load() }.task(id: provider) { await catalog() }
     }
     private func choices(_ value: Any?) -> [ModelChoice] { (value as? [[String: Any]] ?? []).compactMap { item in let id = field(item, "id"); return id.isEmpty ? nil : ModelChoice(id: id, name: field(item, "name").isEmpty ? id : field(item, "name")) } }
     private func load() async {

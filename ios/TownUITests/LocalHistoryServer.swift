@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import XCTest
+import UIKit
 
 // Loopback-only fixture: exercises the real connection/history UI without an account.
 final class LocalHistoryServer {
@@ -16,6 +17,9 @@ final class LocalHistoryServer {
     private var replyText = ""
     private var streamID = ""
     private var sent: [String] = []
+    private var imageRequests: [String] = []
+    var imageURL: String { endpoint + "/markdown-preview?token=signed%2Bvalue%2Fpart&expires=123" }
+    var capturedImageRequests: [String] { lock.lock(); defer { lock.unlock() }; return imageRequests }
     private var historyReceived: XCTestExpectation?
     var endpoint: String { "http://127.0.0.1:\(listener.port!.rawValue)/compat" }
 
@@ -132,6 +136,23 @@ final class LocalHistoryServer {
             let headerBytes = headers.utf8.count + 4
             if buffer.count < headerBytes + length {
                 self.receive(connection, buffer: buffer); return
+            }
+            if headers.contains("/markdown-preview?") {
+                let location = self.endpoint + "/markdown-image?token=signed%2Bvalue%2Fpart&expires=123"
+                let response = "HTTP/1.1 302 Found\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
+                return
+            }
+            if headers.contains("/markdown-image?") {
+                self.lock.lock(); self.imageRequests.append(headers); let first = self.imageRequests.count == 1; self.lock.unlock()
+                let data = UIGraphicsImageRenderer(size: CGSize(width: 640, height: 360)).pngData { context in
+                    UIColor.systemTeal.setFill(); context.fill(CGRect(x: 0, y: 0, width: 640, height: 360))
+                    ("Markdown image preview" as NSString).draw(at: CGPoint(x: 40, y: 150), withAttributes: [.font: UIFont.systemFont(ofSize: 32), .foregroundColor: UIColor.white])
+                }
+                let body = first ? Data() : data
+                let header = "HTTP/1.1 \(first ? "503 Unavailable" : "200 OK")\r\nContent-Type: image/png\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+                connection.send(content: Data(header.utf8) + body, completion: .contentProcessed { _ in connection.cancel() })
+                return
             }
             self.lock.lock(); let chat = self.chatEnabled; self.lock.unlock()
             if chat, headers.contains("/api/chat/stream") { self.openStream(connection, request: request); return }

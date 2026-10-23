@@ -1,0 +1,1 @@
+{"name":"town-mobile-intelligent-ui","private":true,"version":"1.0.0","type":"module","scripts":{"build":"node build.mjs","test":"node --test tests.mjs"},"dependencies":{"react":"19.3.0","react-dom":"19.3.0","marked":"15.0.12"},"devDependencies":{"esbuild":"0.25.12"}}

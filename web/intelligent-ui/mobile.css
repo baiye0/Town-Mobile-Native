@@ -1,0 +1,10 @@
+:root{color-scheme:light dark;--bg:#fff;--bg-soft:#f4f4f5;--text:#202020;--text-dim:#707070;--border:#dedede;--accent:#147b70;--accent-tint:#147b7015;--accent-border:#147b7055;--font-sans:-apple-system,BlinkMacSystemFont,sans-serif;--mono:ui-monospace,monospace}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1c1e;--bg-soft:#29292b;--text:#eee;--text-dim:#aaa;--border:#444;--accent:#81cfbd}}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:16px/1.5 var(--font-sans);overflow-wrap:anywhere}button,input,select{font:inherit;touch-action:manipulation}button{cursor:pointer}button,input,select,summary{min-height:44px}button:focus-visible,input:focus-visible{outline:2px solid var(--accent)}
+.intelligent-ui{margin:0;border:0;box-shadow:none;max-width:100%;width:100%;border-radius:0}.iui-body{padding:12px;gap:18px}.iui-body h3{font-size:22px}.iui-toolbar{position:sticky;top:0;background:var(--bg);z-index:5;padding:6px 12px}.iui-expanded{position:static!important;inset:auto!important}.iui-layout-two,.iui-layout-three,.iui-split,.iui-row{grid-template-columns:1fr!important;flex-wrap:wrap}.iui-grid>*{grid-column:auto!important;min-width:0}.iui-body input,.iui-body select{font-size:16px}.iui-source{max-width:100%;overflow:auto;white-space:pre-wrap}.remote-image-thumbnail{display:block;border:0!important;padding:0!important;background:none!important;width:100%}.remote-image-thumbnail img{width:100%;max-height:300px;object-fit:contain}.iui-version-picker{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;font-size:13px}.iui-notice{padding:10px}.iui-toolbar-actions{flex-wrap:wrap}.iui-app-actions{flex-wrap:wrap}
+
+.iui-toolbar-actions>button[aria-label="展开界面"]{display:none}
+/* Touch targets and selection contrast must override desktop component rules. */
+.intelligent-ui button,.intelligent-ui input,.intelligent-ui select,.intelligent-ui summary{min-height:44px}
+.intelligent-ui .iui-tabs [role=tab][aria-selected=true]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.iui-diagram-layout{grid-template-columns:1fr!important}

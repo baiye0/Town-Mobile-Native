@@ -28,6 +28,7 @@ struct MobileShell: View {
     @StateObject private var social = SocialStore()
     @State private var drag: CGFloat = 0
     @State private var search = ""
+    @FocusState private var sidebarSearchFocused: Bool
     @State private var renameID: String?
     @State private var deletingID: String?
     @State private var renameText = ""
@@ -45,16 +46,22 @@ struct MobileShell: View {
                             ForEach(nav.tabs.map(\.rawValue) + ["more"], id: \.self) { id in
                                 let item = Destination(rawValue: id)
                                 Button { nav.selected = id } label: {
-                                    Image(systemName: item?.icon ?? "square.grid.2x2")
-                                        .font(.system(size: 22)).frame(maxWidth: .infinity).frame(height: 48)
-                                        .background(nav.selected == id ? ClientTheme.surface : .clear, in: RoundedRectangle(cornerRadius: 12))
-                                        .overlay(alignment: .topTrailing) {
-                                            if let item, social.unread(item) > 0 { Circle().fill(.red).frame(width: 7, height: 7).padding(7) }
-                                        }
+                                    VStack(spacing: 4) {
+                                        Image(systemName: item?.icon ?? "square.grid.2x2")
+                                            .font(.system(size: 20)).frame(width: 52, height: 30)
+                                            .background(nav.selected == id ? ClientTheme.surface : .clear, in: Capsule())
+                                            .overlay(alignment: .topTrailing) {
+                                                if let item, social.unread(item) > 0 { Circle().fill(.red).frame(width: 7, height: 7).padding(3) }
+                                            }
+                                        Text(item?.title ?? "更多").font(.caption2)
+                                            .lineLimit(1).minimumScaleFactor(0.8)
+                                    }.foregroundStyle(nav.selected == id ? ClientTheme.text : ClientTheme.secondary)
+                                        .frame(maxWidth: .infinity).frame(minHeight: 48)
                                 }.buttonStyle(.plain).accessibilityLabel(item?.title ?? "更多")
                                     .accessibilityAddTraits(nav.selected == id ? .isSelected : [])
                             }
-                        }.padding(.horizontal, 16).padding(.vertical, 8).background(ClientTheme.background)
+                        }.padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4).background(ClientTheme.background)
+                            .overlay(alignment: .top) { Rectangle().fill(ClientTheme.text.opacity(0.06)).frame(height: 0.5) }
                     }
                 }
                 .offset(x: progress)
@@ -63,14 +70,18 @@ struct MobileShell: View {
                         Color.black.opacity(0.32 * progress / width).ignoresSafeArea().offset(x: progress)
                             .onTapGesture { close() }
                             .gesture(DragGesture().onChanged { drag = min(0, $0.translation.width) }.onEnded { finish($0, width) })
+                            .transition(.opacity).accessibilityHidden(true)
                     }
                 }
                 .accessibilityHidden(nav.sidebar)
                 if progress > 0 {
                     sidebar.frame(width: width).frame(maxHeight: .infinity).background(ClientTheme.background)
+                        .shadow(color: .black.opacity(0.08 * progress / width), radius: 20, x: 8)
                         .offset(x: progress - width)
-                        .shadow(color: .black.opacity(0.08), radius: 20, x: 8)
-
+                        // Explicitly slide the removed view offscreen. The default
+                        // opacity transition leaves a fading copy over the chat.
+                        .transition(.offset(x: -width))
+                        .zIndex(1)
                 }
                 if !nav.sidebar && nav.selected == "chat" {
                     Color.clear.frame(width: 22).contentShape(Rectangle())
@@ -85,6 +96,7 @@ struct MobileShell: View {
         }
         .task { social.startLive(); store.resumeDelivery(); CompletionNotifications.shared.openScene = { endpoint, scene in if store.connection?.endpoint == endpoint { store.selectScene(scene); nav.selected = "chat" } }; if let (endpoint, scene) = CompletionNotifications.shared.pending { CompletionNotifications.shared.openScene?(endpoint, scene); CompletionNotifications.shared.pending = nil } }
         .onChange(of: nav.selected) { value in store.chatVisible = value == "chat" }
+        .onChange(of: nav.sidebar) { opened in if !opened { sidebarSearchFocused = false } }
         .onChange(of: phase) { phase in store.appActive = phase == .active; if phase == .active { social.startLive(); store.resumeDelivery() } else { social.stopLive() } }
         .alert("删除场景？", isPresented: Binding(get: { deletingID != nil },set: { if !$0 { deletingID = nil } })) {
             Button("取消",role:.cancel) { deletingID = nil }
@@ -100,22 +112,22 @@ struct MobileShell: View {
         if #available(iOS 18.0, *) {
             TabView(selection: $nav.selected) {
                 ForEach(nav.tabs) { item in
-                    Tab(value: item.rawValue) { destination(item).toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Image(systemName: item.icon).accessibilityLabel(item.title) }.badge(social.unread(item))
+                    Tab(value: item.rawValue) { destination(item).toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Label(item.title, systemImage: item.icon) }.badge(social.unread(item))
                 }
-                Tab(value: "more") { MoreView().toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Image(systemName: "square.grid.2x2").accessibilityLabel("更多") }
+                Tab(value: "more") { MoreView().toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Label("更多", systemImage: "square.grid.2x2") }
             }
         } else {
             TabView(selection: $nav.selected) {
                 ForEach(nav.tabs) { item in
                     destination(item)
                         .toolbar(glass ? .automatic : .hidden, for: .tabBar)
-                        .tabItem { Image(systemName: item.icon).accessibilityLabel(item.title) }
+                        .tabItem { Label(item.title, systemImage: item.icon) }
                         .tag(item.rawValue)
                         .badge(social.unread(item))
                 }
                 MoreView()
                     .toolbar(glass ? .automatic : .hidden, for: .tabBar)
-                    .tabItem { Image(systemName: "square.grid.2x2").accessibilityLabel("更多") }
+                    .tabItem { Label("更多", systemImage: "square.grid.2x2") }
                     .tag("more")
             }
         }
@@ -138,7 +150,7 @@ struct MobileShell: View {
             }.padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 12)
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").font(.system(size: 15)).foregroundStyle(ClientTheme.secondary)
-                TextField("搜索场景", text: $search).font(.system(size: 15)).submitLabel(.search)
+                TextField("搜索场景", text: $search).font(.system(size: 15)).submitLabel(.search).focused($sidebarSearchFocused)
             }.padding(.horizontal, 12).frame(height: 44)
                 .background(ClientTheme.surface, in: RoundedRectangle(cornerRadius: 12)).padding(.horizontal, 16)
             Button { nav.sceneSheet = "create"; nav.selected = "chat"; close() } label: {
@@ -201,78 +213,42 @@ struct NavigationSettings: View {
     @EnvironmentObject private var nav: NavigationState
     var body: some View {
         List {
-            Section("底部导航") {
+            Section {
                 ForEach(nav.tabs) { item in
-                    HStack { Label(item.title, systemImage: item.icon); Spacer(); if item != .chat { Button("移除") { nav.tabs.removeAll { $0 == item }; nav.selected = "more" }.font(.caption) } }
+                    HStack(spacing: 14) {
+                        SettingsIcon(name: item.icon)
+                        Text(item.title).font(.body.weight(.medium))
+                        Spacer()
+                        if item != .chat {
+                            Button { nav.tabs.removeAll { $0 == item }; nav.selected = "more" } label: {
+                                Image(systemName: "minus.circle").frame(width: 44, height: 44)
+                            }.buttonStyle(.plain).foregroundStyle(ClientTheme.secondary).accessibilityLabel("移除" + item.title)
+                        }
+                    }.padding(.vertical, 4)
                 }.onMove { nav.tabs.move(fromOffsets: $0, toOffset: $1) }
+                    .listRowBackground(ClientTheme.surface)
+            } header: { Text("已显示 · \(nav.tabs.count)/4") }
+            footer: {
+                Text("拖动右侧手柄调整顺序。\n对话与更多始终保留，最多添加四个入口。")
+                    .font(.footnote).fixedSize(horizontal: false, vertical: true)
             }
             Section("可添加") {
                 ForEach(Destination.allCases.filter { !nav.tabs.contains($0) }) { item in
-                    Button { if nav.tabs.count < 4 { nav.tabs.append(item) } } label: { Label(item.title, systemImage: "plus.circle") }.disabled(nav.tabs.count >= 4)
+                    Button { if nav.tabs.count < 4 { nav.tabs.append(item) } } label: {
+                        HStack(spacing: 14) {
+                            SettingsIcon(name: item.icon)
+                            Text(item.title).frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "plus.circle").font(.title3)
+                        }.padding(.vertical, 4).foregroundStyle(ClientTheme.text)
+                    }.disabled(nav.tabs.count >= 4).opacity(nav.tabs.count >= 4 ? 0.4 : 1).listRowBackground(ClientTheme.surface)
                 }
             }
-            Section { Button("恢复默认") { nav.tabs = [.chat, .firesides, .mail, .bonfire] } }
-        }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("自定义导航").environment(\.editMode, .constant(.active))
-    }
-}
-struct MoreView: View {
-    @EnvironmentObject private var store: Store
-    @AppStorage("appearance") private var appearance = "system"
-    @AppStorage("glassEffects") private var glass = true
-    @StateObject private var appUpdate = AppUpdateStore()
-    var body: some View {
-        HistoryStack {
-            List {
-                Section { HStack(spacing: 16) { Image("ClientLogo").resizable().frame(width: 48,height: 48).clipShape(RoundedRectangle(cornerRadius: 12)); VStack(alignment: .leading, spacing: 6) { Text("Being").font(.title2.bold()); Text(store.connection?.being ?? "Being").foregroundStyle(ClientTheme.secondary) } }.padding(.vertical, 12) }
-                Section("小镇") {
-                    ForEach([Destination.firesides, .bonfire, .mail]) { item in HistoryLink { SocialView(kind: item) } label: { Label(item.title, systemImage: item.icon) } }
-                    ForEach(["home","seeds","embers","scrolls","announcements","contacts"], id: \.self) { category in
-                        HistoryLink { CatalogView(category: category) } label: { Label(["home":"小镇广场","seeds":"种子花园","embers":"书架","scrolls":"卷轴","announcements":"公告","contacts":"通讯录"][category]!, systemImage: ["home":"house","seeds":"leaf","embers":"books.vertical","scrolls":"doc.text","announcements":"megaphone","contacts":"person.crop.rectangle.stack"][category]!) }
-                    }
-                }
-                Section("设置") {
-                    HistoryLink { ConversationSettingsView() } label: { Label("对话设置", systemImage: "bubble.left.and.bubble.right") }
-                    HistoryLink { NotificationSettingsView() } label: { Label("通知设置", systemImage: "bell") }
-                    HistoryLink { SettingsView() } label: { Label("连接 Being", systemImage: "link") }
-                    HistoryLink { PairingView() } label: { Label("连接 Being Town", systemImage: "person.badge.key") }
-                    HistoryLink { ModelSettingsView() } label: { Label("模型设置", systemImage: "cpu") }
-                    HistoryLink { NavigationSettings() } label: { Label("自定义底部导航", systemImage: "slider.horizontal.3") }
-                }
-                Section("外观") {
-                    if #available(iOS 26.0, *) { Toggle("玻璃效果", isOn: $glass) }
-                    Picker("外观", selection: $appearance) { Text("跟随系统").tag("system"); Text("浅色").tag("light"); Text("深色").tag("dark") }
-                }
-                Section("应用") {
-                    Text(appUpdate.message).font(.caption).foregroundStyle(ClientTheme.secondary)
-                    Button("检查更新") { Task { await appUpdate.check() } }.disabled(appUpdate.phase == .checking)
-                    if appUpdate.phase == .available, let url = appUpdate.releaseURL { Link("打开发布页", destination: url) }
-                }.task { if appUpdate.phase == .idle { await appUpdate.check() } }
-            }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("更多")
-        }
-    }
-}
-
-struct ConversationSettingsView: View {
-    @EnvironmentObject private var store: Store
-    @AppStorage("reading.size") private var readingSize = 16.0
-    var body: some View {
-        Form {
-            Section("SBS") { if store.connection != nil { SBSControlView() } else { Text("连接 Being 后可配置 SBS").foregroundStyle(ClientTheme.secondary) } }
-            Section("阅读") { Stepper("阅读字号 · \(Int(readingSize))", value: $readingSize, in: 12...24) }
-        }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("对话设置")
-    }
-}
-
-struct NotificationSettingsView: View {
-    @AppStorage("notify.completed") private var notifications = false
-    @AppStorage("notify.social.enabled") private var socialNotifications = false
-    @AppStorage("notify.social.mail") private var notifyMail = false
-    @AppStorage("notify.social.firesides") private var notifyFiresides = false
-    @AppStorage("notify.social.bonfire") private var notifyBonfire = false
-    var body: some View {
-        Form {
-            Section("对话") { Toggle("对话完成通知", isOn: Binding(get: { notifications }, set: { value in if value { Task { notifications = await CompletionNotifications.shared.enable() } } else { notifications = false } })); Text("应用仍在运行时提示完成。系统暂停或关闭应用后，返回应用会核对回复。").font(.caption).foregroundStyle(ClientTheme.secondary) }
-            Section("小镇") { Toggle("小镇通知总开关", isOn: Binding(get: { socialNotifications }, set: { value in if value { Task { socialNotifications = await CompletionNotifications.shared.enable() } } else { socialNotifications = false } })); Toggle("私信", isOn: $notifyMail).disabled(!socialNotifications); Toggle("围炉", isOn: $notifyFiresides).disabled(!socialNotifications); Toggle("篝火", isOn: $notifyBonfire).disabled(!socialNotifications); Text("配对 Town 后接收新消息提醒，不展示消息正文。").font(.caption).foregroundStyle(ClientTheme.secondary) }
-        }.scrollContentBackground(.hidden).background(ClientTheme.background).navigationTitle("通知设置")
+            Section {
+                Button("恢复默认") { nav.tabs = [.chat, .firesides, .mail, .bonfire] }
+                    .frame(maxWidth: .infinity).frame(minHeight: 44).listRowBackground(ClientTheme.surface)
+            }
+        }.listStyle(.insetGrouped).scrollContentBackground(.hidden).background(ClientTheme.background)
+            .navigationTitle("底部导航").navigationBarTitleDisplayMode(.inline)
+            .environment(\.editMode, .constant(.active))
     }
 }
