@@ -1,8 +1,23 @@
+import java.util.Properties
+
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
+val appVersion = Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}
 android {
     namespace = "town.nativeapp"
     compileSdk = 36
-    defaultConfig { applicationId = "town.beings.nativeapp"; minSdk = 28; targetSdk = 36; versionCode = 1; versionName = "0.1.0"; testInstrumentationRunner = providers.gradleProperty("testRunner").orElse("town.nativeapp.ChatScrollInstrumentation").get() }
+    defaultConfig { applicationId = "town.beings.nativeapp"; minSdk = 28; targetSdk = 36; versionCode = appVersion.getProperty("versionCode").toInt(); versionName = appVersion.getProperty("versionName"); testInstrumentationRunner = providers.gradleProperty("testRunner").orElse("town.nativeapp.ChatScrollInstrumentation").get() }
+    val releaseKeystore = providers.environmentVariable("ANDROID_RELEASE_KEYSTORE_PATH").orNull
+    if (releaseKeystore != null) {
+        signingConfigs.create("release") {
+            storeFile = file(releaseKeystore)
+            storePassword = providers.environmentVariable("ANDROID_RELEASE_STORE_PASSWORD").get()
+            keyAlias = providers.environmentVariable("ANDROID_RELEASE_KEY_ALIAS").get()
+            keyPassword = providers.environmentVariable("ANDROID_RELEASE_KEY_PASSWORD").get()
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("release")
+    }
     defaultConfig.manifestPlaceholders["appLabel"] = "Being"
     if (providers.gradleProperty("portalQa").orNull == "true") {
         defaultConfig.applicationId = "town.beings.nativeapp.portalqa"
