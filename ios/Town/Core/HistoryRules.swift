@@ -55,9 +55,49 @@ extension HistoryRules {
         var echoes = confirmed.filter { $0.sequence.map { !known.contains($0) } ?? false }.sorted { ($0.sequence ?? 0) < ($1.sequence ?? 0) }
         let attachmentMarker = try! NSRegularExpression(pattern: "(?m)^\\[attachment-message:v1:msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*\\]\\r?$")
         func attachmentLine(_ text: String) -> String? { text.split(whereSeparator: \.isNewline).last(where: { $0.hasPrefix("[attachment-message:v1:") }).map(String.init) }
+        // History can be ahead of the transport. Bind a unique prefix only
+        // inside the initiating prompt's turn, never across a later question.
+        let localByID = Dictionary(local.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
+        func promptStart(_ message: Message) -> Int? {
+            guard let promptID = message.replyTo, let prompt = localByID[promptID],
+                  let baseline = message.localBaseline else { return nil }
+            let matches = confirmed.filter { $0.role == "user" && $0.sceneID == prompt.sceneID &&
+                ($0.sequence ?? 0) > baseline && DeliveryRules.matchesSubmittedText($0.text, prompt.text) }
+            return prompt.sequence ?? (matches.count == 1 ? matches.first?.sequence : nil)
+        }
+        func liveEcho(_ message: Message) -> Message? {
+            guard let promptID = message.replyTo, let start = promptStart(message) else { return nil }
+            let end = indexed.values.filter { $0.role == "user" && $0.sceneID == message.sceneID && ($0.sequence ?? 0) > start }
+                .compactMap(\.sequence).min() ?? Int.max
+            let previous = message.localAfter.flatMap { localByID[$0]?.sequence } ?? start
+            let candidates = indexed.values.filter { row in
+                guard row.role == "being", row.kind == nil, row.sceneID == message.sceneID,
+                      let seq = row.sequence, seq > max(start, previous), seq < end,
+                      row.replyTo == nil || row.id == message.id else { return false }
+                return !message.text.isEmpty && !row.text.isEmpty &&
+                    (row.text == message.text || message.streaming == true &&
+                        (row.text.hasPrefix(message.text) || message.text.hasPrefix(row.text)))
+            }
+            guard candidates.count == 1, let candidate = candidates.first else { return nil }
+            let competing = local.filter { $0.sequence == nil && $0.replyTo == promptID && !$0.text.isEmpty &&
+                (candidate.text == $0.text || $0.streaming == true && (candidate.text.hasPrefix($0.text) || $0.text.hasPrefix(candidate.text))) }
+            return competing.count == 1 ? candidate : nil
+        }
         let pending = local.filter { m in
             guard m.sequence == nil else { return false }
             if role(m.role) == "being" && m.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return false }
+            if let remote = liveEcho(m), let seq = remote.sequence {
+                var merged = remote
+                merged.id = m.id; merged.text = m.text; merged.streaming = m.streaming
+                merged.persistedText = m.streaming == true ? remote.persistedText ?? remote.text : nil
+                merged.replyTo = m.replyTo; merged.localAfter = m.localAfter; merged.localBaseline = m.localBaseline
+                merged.files = m.files ?? remote.files; merged.process = m.process ?? remote.process
+                indexed[seq] = merged
+                echoes.removeAll { $0.sequence == seq }
+                return false
+            }
+            // A known turn must not fall back to an equal text from another turn.
+            if promptStart(m) != nil { return true }
             let hasAttachment = attachmentMarker.firstMatch(in: m.text, range: NSRange(m.text.startIndex..., in: m.text)) != nil
             let candidates = hasAttachment ? confirmed : echoes
             if let matched = candidates.firstIndex(where: { candidate in

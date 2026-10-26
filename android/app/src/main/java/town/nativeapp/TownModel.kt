@@ -38,10 +38,15 @@ class TownModel(app: Application) : AndroidViewModel(app) {
     private val historyFile=File(app.filesDir,"history-cache.json")
     private var historyCache=runCatching{JSONObject(historyFile.readText())}.getOrDefault(JSONObject())
     val mainID get()=connection?.let { scenePrefs.getString("main.${it.endpoint}",null) }
+    private val displayCache=StreamDisplayCache()
     private val displayState = derivedStateOf {
-        (if(showAllScenes) HistoryRules.merge(rooms.filter{it.endpoint==connection?.endpoint}.flatMap{r->r.messages.map{it.copy(sceneID=it.sceneID ?: r.id)}},timeline,activeMessageIDs)
-        else HistoryRules.ordered(current?.messages.orEmpty()+if(showSBS)timeline.filter{it.sceneID==null&&it.role!="user"}else emptyList()))
-            .filter { it.text.isNotBlank() || !it.files.isNullOrEmpty() }
+        val local=if(showAllScenes)rooms.filter{it.endpoint==connection?.endpoint}.flatMap{r->r.messages.map{if(it.sceneID==null)it.copy(sceneID=r.id)else it}} else current?.messages.orEmpty()
+        val active=activeMessageIDs
+        displayCache.render(listOf(connection?.endpoint,selected,showAllScenes,showSBS),local,timeline,active) {
+            (if(showAllScenes)HistoryRules.merge(local,timeline,active)
+            else HistoryRules.ordered(local+if(showSBS)timeline.filter{it.sceneID==null&&it.role!="user"}else emptyList()))
+                .filter { it.text.isNotBlank() || !it.files.isNullOrEmpty() }
+        }
     }
     val displayMessages get() = displayState.value
     private val activeMessageIDs get()=outbox.flatMap{listOf(it.userID,it.replyID)+it.bubbles.orEmpty().map{b->b.id}}.toSet()
@@ -154,6 +159,10 @@ class TownModel(app: Application) : AndroidViewModel(app) {
     fun delete(id:String){if(busy)return;if(outbox.any{it.endpoint==connection?.endpoint&&it.sceneID==id}){notice="请先处理该场景的发送队列。";return};saveDirectory(sceneIDs().filter{it!=id});if(id==mainID){scenePrefs.edit().remove("main.${connection?.endpoint}").apply();ensureMain()};if(selected==id)selected=mainID;persist()}
     private fun request(c: Connection, path: String, body: JSONObject? = null): Request {
         val b = Request.Builder().url(c.url(path))
+        if(path == "/api/chat/stream" || path.startsWith("/api/stream/active")) {
+            b.header("Cache-Control", "no-cache")
+            if(path == "/api/chat/stream") b.header("Accept", "text/event-stream")
+        }
         if (path.startsWith("/api/llm/")) b.header("X-Relay-Secret", c.secret)
         if (body != null) b.post(body.toString().toRequestBody("application/json".toMediaType()))
         return b.build()
@@ -228,7 +237,44 @@ class TownModel(app: Application) : AndroidViewModel(app) {
         }
         try{outbox=outbox.map{it.copy()};saveOutbox();if(remove)rooms=rooms.map{r->if(r.endpoint==entry.endpoint&&r.id==entry.sceneID)r.copy(messages=r.messages.filterNot{it.sequence==null&&(it.id==entry.userID||it.replyTo==entry.userID||it.kind in listOf(entry.userID,entry.replyID))}) else r} else project(entry);persist();if(remove&&notice=="发送未完成，请查看发送队列。"&&!visibleOutbox.any{it.phase in listOf("failed","unknown")})notice=null;startDelivery()}catch(_:Exception){outbox=old;notice="无法保存队列修改。"}
     }
-    fun retryQueued(id:String){val entry=outbox.find{it.id==id&&it.phase=="failed"} ?: return;entry.phase="queued";entry.error=null;entry.files.filter{it.attachmentID!=null&&it.jobID==null}.forEach{it.forceParse=true};try{saveOutbox();startDelivery()}catch(_:Exception){entry.phase="failed";notice="无法保存发送状态。"}}
+    fun retryQueued(id:String){if(outbox.any{it.id==id&&it.phase=="unknown"}){retryUnconfirmed(id);return};val entry=outbox.find{it.id==id&&it.phase=="failed"} ?: return;entry.phase="queued";entry.error=null;entry.files.filter{it.attachmentID!=null&&it.jobID==null}.forEach{it.forceParse=true};try{saveOutbox();startDelivery()}catch(_:Exception){entry.phase="failed";notice="无法保存发送状态。"}}
+    private fun retryUnconfirmed(id:String) {
+        if(worker!=null||busy)return
+        val c=connection ?: return
+        val initial=outbox.find{it.id==id&&it.endpoint==c.endpoint&&it.phase=="unknown"} ?: return
+        busy=true;activeScene=initial.sceneID;activeSendID=id;activity="正在核对发送结果"
+        worker=viewModelScope.launch {
+            var resumeConfirmed=false
+            val entry=PendingSend.read(initial.json())
+            try {
+                val response=withContext(Dispatchers.IO){client.newCall(request(c,"/api/stream/active")).execute().use{it.code to it.body?.string()}}
+                val active=if(response.first==204)false else {
+                    check(response.first==200)
+                    val data=JSONObject(response.second ?: "{}")
+                    check(data.opt("stream_id") is String && data.opt("finished") is Boolean)
+                    !data.getBoolean("finished")
+                }
+                var accepted=false
+                val completed=reconcile(entry,c){accepted=it}
+                ensureActive()
+                if(connection!=c||outbox.none{it.id==id&&it.phase=="unknown"})return@launch
+                val previous=outbox
+                if(DeliveryRules.shouldRecoverConfirmedSend(active,accepted,entry.reply.isNotEmpty())) {
+                    entry.phase="waiting";entry.error=null
+                    outbox=outbox.map{if(it.id==id)entry else it};resumeConfirmed=true
+                } else if(completed||accepted) {
+                    check(persist()) { "无法保存已确认的消息" }
+                    outbox=outbox.filter{it.id!=id}
+                } else if(!active&&entry.reply.isEmpty()) {
+                    entry.phase="queued";entry.error=null;entry.streamID=null;entry.cursor=0
+                    outbox=outbox.map{if(it.id==id)entry else it}
+                } else outbox=outbox.map{if(it.id==id)it.copy(error="服务仍在处理消息，请稍后重试。") else it}
+                try{saveOutbox()}catch(e:Exception){outbox=previous;throw e}
+            } catch(e:CancellationException){throw e}
+            catch(_:Exception){outbox=outbox.map{if(it.id==id)it.copy(error="暂时无法核对发送结果，请重试。") else it};runCatching{saveOutbox()}}
+            finally{busy=false;activeScene=null;activeSendID=null;worker=null;activity="";persist();startDelivery(resumeConfirmed)}
+        }
+    }
     fun resumeDelivery(){startDelivery(true)}
     private fun checkpoint(entry:PendingSend){outbox=outbox.map{if(it.id==entry.id)entry.copy() else it};saveOutbox()}
     private fun project(entry:PendingSend){
@@ -253,8 +299,9 @@ class TownModel(app: Application) : AndroidViewModel(app) {
     private fun startDelivery(recover:Boolean=false){
         if(outboxUnavailable||worker!=null||busy)return;val c=connection ?: return
         val endpointItems=outbox.withIndex().filter{it.value.endpoint==c.endpoint}
+        val recoverUnknown=recover&&endpointItems.none{it.value.phase in listOf("queued","preparing")}
         var head=0
-        while(head<endpointItems.size&&endpointItems[head].value.phase in listOf("failed","stopped"))head++
+        while(head<endpointItems.size&&DeliveryRules.skipsQueueHead(endpointItems[head].value.phase,recoverUnknown))head++
         if(head>=endpointItems.size)return
         val first=endpointItems[head].value
         if(first.phase !in listOf("queued","preparing")&&!(recover&&first.phase in listOf("sending","waiting","unknown")))return
@@ -324,9 +371,10 @@ class TownModel(app: Application) : AndroidViewModel(app) {
     }
     private suspend fun recover(entry:PendingSend,c:Connection):Boolean{
         activity="正在恢复回复"
-        var idleSince=System.currentTimeMillis();var attempt=0;var failures=0
+        var idleSince=System.currentTimeMillis();var interval=500L;var failures=0
         while(System.currentTimeMillis()-idleSince<300000){
             currentCoroutineContext().ensureActive()
+            var receivedEvents=false
             try{
                 val response=withContext(Dispatchers.IO){client.newCall(request(c,"/api/stream/active?after=${entry.cursor}")).execute().use{it.code to it.body?.string()}}
                 if(response.first==204)return reconcile(entry,c)
@@ -337,20 +385,21 @@ class TownModel(app: Application) : AndroidViewModel(app) {
                 else{
                     entry.streamID=id;streamID=id;val events=data.optJSONArray("events") ?: JSONArray()
                     if(events.length()>0&&events.getJSONObject(0).optInt("seq")>entry.cursor+1)return reconcile(entry,c)
-                    for(i in 0 until events.length()){val event=events.getJSONObject(i);val seq=event.optInt("seq");if(seq<=entry.cursor)continue;val type=event.optString("event");val value=event.optJSONObject("data") ?: JSONObject();if(ReplyStream.isProgress(type,value,entry.sceneID))idleSince=System.currentTimeMillis();consume(type,value,entry);entry.cursor=seq}
+                    for(i in 0 until events.length()){val event=events.getJSONObject(i);val seq=event.optInt("seq");if(seq<=entry.cursor)continue;val type=event.optString("event");val value=event.optJSONObject("data") ?: JSONObject();if(ReplyStream.isProgress(type,value,entry.sceneID))idleSince=System.currentTimeMillis();consume(type,value,entry);entry.cursor=seq;receivedEvents=true}
                     checkpoint(entry);project(entry)
                     if(data.optBoolean("finished"))return reconcile(entry,c)
                 }
                 failures=0
             }catch(e:CancellationException){throw e}catch(e:Exception){failures++;if(failures>=5)throw e}
-            attempt++;delay(minOf(5000L,1000L+attempt/3*1000L))
+            interval=if(receivedEvents)500L else minOf(5000L,interval*3/2)
+            delay(interval)
         };return false
     }
     private suspend fun historyBaseline(c:Connection,after:Int):Int {
         var cursor=after
         while(true){val a=json(c,"/api/history?limit=500&after=$cursor").optJSONArray("messages") ?: JSONArray();val next=(0 until a.length()).map{a.getJSONObject(it).optInt("seq")}.maxOrNull() ?: cursor;if(next<=cursor)return cursor;cursor=next}
     }
-    private suspend fun reconcile(entry:PendingSend,c:Connection):Boolean{
+    private suspend fun reconcile(entry:PendingSend,c:Connection,submissionFound:((Boolean)->Unit)?=null):Boolean{
         var cursor=entry.baseline;var sawUser=false;val reply=StringBuilder();var ended=false;val confirmed=mutableListOf<Message>()
         while(!ended){
             val result=json(c,"/api/history?limit=500&after=$cursor").optJSONArray("messages") ?: JSONArray()
@@ -362,6 +411,7 @@ class TownModel(app: Application) : AndroidViewModel(app) {
                 else if(sawUser&&row.optString("type")!="marker"&&row.optString("from")!="system"){if(reply.isNotEmpty())reply.append("\n\n");reply.append(text);confirmed.add(HistoryRules.decode(row))}
             };cursor=rows.maxOf{it.optInt("seq")}
         }
+        submissionFound?.invoke(sawUser)
         if(!sawUser||reply.isEmpty())return false;entry.reply=reply.toString()
         val bound=ReplyStream.bindHistory(confirmed,entry)
         val replaced=bound.map{it.id}.toSet();val sequences=bound.mapNotNull{it.sequence}.toSet()

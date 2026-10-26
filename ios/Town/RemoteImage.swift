@@ -54,6 +54,7 @@ struct RemoteImage: View {
     let image: ChatImage
     var open: (() -> Void)? = nil
     var fullScreen = false
+    var inlineMaxHeight: CGFloat = 260
     @State private var bitmap: UIImage?
     @State private var failed = false
     @State private var retry = 0
@@ -74,7 +75,7 @@ struct RemoteImage: View {
                     .accessibilityLabel(image.label.isEmpty ? "查看图片" : image.label)
             } else if failed { Button("图片加载失败，点击重试") { retry += 1 } }
             else { ProgressView("正在加载图片") }
-        }.frame(maxWidth: .infinity, minHeight: 140, maxHeight: fullScreen ? .infinity : 260).clipped()
+        }.frame(maxWidth: .infinity, minHeight: 140, maxHeight: fullScreen ? .infinity : inlineMaxHeight).clipped()
             .task(id: "\(image.url)|\(retry)") {
                 bitmap = nil; failed = false
                 do {

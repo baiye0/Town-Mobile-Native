@@ -240,6 +240,7 @@ struct ChatView: View {
     var body: some View {
         let allMessages = store.displayMessages
         let messages = allMessages
+        let lastUserIndex = messages.lastIndex(where: { $0.role == "user" }) ?? -1
         ScrollViewReader { proxy in
             ScrollView {
                 if !messages.isEmpty {
@@ -254,9 +255,12 @@ struct ChatView: View {
                                 let isUser = message.role == "user"
                                 let isGlobalBeingMessage = message.sceneID == nil && message.role == "being" && message.kind == nil
                                 let hasAttachment = isUser && (!((message.files ?? []).isEmpty) || message.text.contains("[attachment-message:v1:"))
-                                let originalText = DeliveryRules.displayText(message.text).trimmingCharacters(in: .whitespacesAndNewlines)
-                                HStack(alignment: .top) {
-                                    if isUser { Spacer(minLength: 40) }
+                                let originalText = hasAttachment ? DeliveryRules.displayText(message.text).trimmingCharacters(in: .whitespacesAndNewlines) : ""
+                                HStack(alignment: .center, spacing: 4) {
+                                    if isUser {
+                                        Spacer(minLength: 16)
+                                        DeliveryStatusView(message: message)
+                                    }
                                     if hasAttachment {
                                         VStack(alignment: .trailing, spacing: 8) {
                                             VStack(alignment: .trailing, spacing: 9) {
@@ -269,7 +273,6 @@ struct ChatView: View {
                                                         .frame(maxWidth: .infinity, alignment: .leading)
                                                 }
                                                 AttachmentMessageView(message: message, foreground: ClientTheme.text, attachmentCards: true).tint(ClientTheme.accent)
-                                                DeliveryStatusView(message: message, foreground: ClientTheme.secondary)
                                             }
 
                                             if !originalText.isEmpty {
@@ -299,7 +302,6 @@ struct ChatView: View {
                                                     .frame(maxWidth: .infinity, alignment: .leading)
                                             }
                                             AttachmentMessageView(message: message, foreground: isUser ? .white : ClientTheme.text).tint(isUser ? .white : ClientTheme.accent)
-                                            if isUser { DeliveryStatusView(message: message, foreground: .white) }
                                         }.padding(16)
                                             .background(isUser ? ClientTheme.chatSent : ClientTheme.chatReply, in: RoundedRectangle(cornerRadius: 22))
                                             .contextMenu {
@@ -322,7 +324,7 @@ struct ChatView: View {
                             }
                             }.id(message.id)
                                 .modifier(StreamReplyGeometry(tracked: message.id == store.streamingReplyID &&
-                                    index > (messages.lastIndex(where: { $0.role == "user" }) ?? -1),
+                                    index > lastUserIndex,
                                     viewportHeight: legacyViewportHeight, fillsViewport: $replyFillsViewport))
                         }
                         if store.historyLoading { ProgressView() }
@@ -415,26 +417,22 @@ struct ChatView: View {
 }
 private struct DeliveryStatusView: View {
     let message: Message
-    let foreground: Color
     @EnvironmentObject private var store: Store
-    private var entry: PendingSend? { store.outbox.first { $0.userID == message.id } }
+    private var entry: PendingSend? { store.outbox.first { $0.userID == message.id && $0.endpoint == store.connection?.endpoint } }
     var body: some View {
-        if let entry, let label = DeliveryRules.bubbleStatus(entry) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(label).font(.caption).foregroundStyle(foreground.opacity(0.82)).accessibilityAddTraits(.updatesFrequently)
-                if let error = entry.error, !error.isEmpty { Text(error).font(.caption2).foregroundStyle(foreground.opacity(0.76)).lineLimit(3) }
-                HStack(spacing: 20) {
-                    if entry.phase == "failed" { Button("重试") { store.retryQueued(entry.id) } }
-                    if entry.phase == "unknown" { Button("核对历史") { store.resumeDelivery() } }
-                    if store.canDeleteMessage(message) {
-                        BeingIconButton("删除", systemImage: "trash", role: .destructive) { store.deleteMessage(message) }
-                            .accessibilityHint("删除本机消息及对应的待发送记录")
-                    }
-                }.font(.caption).foregroundStyle(foreground)
+        if let entry {
+            if DeliveryRules.showsRetry(entry.phase) {
+                Button { store.retryQueued(entry.id) } label: {
+                    Image(systemName: "exclamationmark.circle.fill").font(.system(size: 22))
+                        .foregroundStyle(.red).frame(width: 44, height: 44)
+                }.buttonStyle(.plain)
+                    .disabled(entry.phase == "unknown" && store.busy)
+                    .accessibilityLabel("重试发送")
+                    .accessibilityHint(entry.error ?? "消息未发送成功，点击重试")
+                    .accessibilityIdentifier("retryMessage")
             }
         }
     }
-
 }
 func chatTime(_ value:String) -> String {
     let fractional=ISO8601DateFormatter(); fractional.formatOptions=[.withInternetDateTime,.withFractionalSeconds]

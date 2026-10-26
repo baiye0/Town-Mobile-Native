@@ -48,7 +48,7 @@ enum Vault {
 }
 
 @MainActor final class Store: ObservableObject {
-    @Published var connection = Vault.load() { didSet { displayRevision += 1; sbsEnabled = nil; sbsActivity = ""; sbsError = nil; sbsRevision += 1 } }
+    @Published var connection = Vault.load() { didSet { IOSPortalStore.shared.bind(connection); displayRevision += 1; sbsEnabled = nil; sbsActivity = ""; sbsError = nil; sbsRevision += 1 } }
     @Published var conversations: [Conversation] = [] { didSet { displayRevision += 1 } }
     @Published var selected: String? { didSet { displayRevision += 1; showSBS = UserDefaults.standard.bool(forKey: "scene.sbs.\(connection?.endpoint ?? "")|\(selected ?? "")") } }
     @Published var showAllScenes = false { didSet { displayRevision += 1; if let endpoint = connection?.endpoint { UserDefaults.standard.set(showAllScenes,forKey:"scene.all.\(endpoint)") } } }
@@ -69,6 +69,35 @@ enum Vault {
         let revision = displayRevision
         if cachedRevision != revision { cachedDisplay = buildDisplayMessages().filter { !isMessageDeleted($0, endpoint: connection?.endpoint ?? "") && DeliveryRules.hasVisibleContent($0.text, hasAttachments: $0.files?.isEmpty == false) }; cachedRevision = revision }
         return cachedDisplay
+    }
+    // Token-only edits do not change row identity or ordering. Patch the visible
+    // snapshot instead of re-merging and sorting every historical row per frame.
+    func projectConversation(_ room: Conversation, at index: Int) {
+        let old = conversations[index].messages
+        let cacheWasCurrent = cachedRevision == displayRevision
+        conversations[index] = room
+        guard cacheWasCurrent, old.count == room.messages.count else { return }
+        var updates: [UUID: Message] = [:]
+        for (before, after) in zip(old, room.messages) where before != after {
+            guard before.id == after.id, before.sequence == after.sequence,
+                  before.role == after.role, before.sceneLabel == after.sceneLabel,
+                  before.persistedText == after.persistedText,
+                  before.text == after.text || after.streaming == true,
+                  before.sceneID == after.sceneID, before.replyTo == after.replyTo,
+                  before.localAfter == after.localAfter, before.localBaseline == after.localBaseline,
+                  before.timestamp == after.timestamp, before.kind == after.kind,
+                  before.streaming == after.streaming,
+                  DeliveryRules.hasVisibleContent(before.text, hasAttachments: before.files?.isEmpty == false) ==
+                    DeliveryRules.hasVisibleContent(after.text, hasAttachments: after.files?.isEmpty == false) else { return }
+            updates[after.id] = after
+        }
+        for i in cachedDisplay.indices {
+            guard let update = updates[cachedDisplay[i].id] else { continue }
+            // A display-only history merge may already know the server sequence.
+            cachedDisplay[i].text = update.text; cachedDisplay[i].process = update.process
+            cachedDisplay[i].files = update.files; cachedDisplay[i].streaming = update.streaming
+        }
+        cachedRevision = displayRevision
     }
     private func buildDisplayMessages() -> [Message] {
         if showAllScenes { return HistoryRules.merge(conversations.filter { $0.endpoint == connection?.endpoint }.flatMap { room in room.messages.map { message in var m = message; if m.sceneID == nil { m.sceneID = room.id }; return m } }, timeline, activeIDs: activeMessageIDs) }
@@ -182,6 +211,11 @@ enum Vault {
     func request(_ c: Connection, _ path: String, method: String = "GET", body: [String: Any]? = nil) -> URLRequest {
         var r = URLRequest(url: c.url(path)); r.httpMethod = method; r.timeoutInterval = 60
         r.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if path == "/api/chat/stream" || path.hasPrefix("/api/stream/active") {
+            r.cachePolicy = .reloadIgnoringLocalCacheData
+            r.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+            if path == "/api/chat/stream" { r.setValue("text/event-stream", forHTTPHeaderField: "Accept") }
+        }
         if path.hasPrefix("/api/llm/") { r.setValue(c.secret, forHTTPHeaderField: "X-Relay-Secret") }
         if let body { r.httpBody = try? JSONSerialization.data(withJSONObject: body) }
         return r

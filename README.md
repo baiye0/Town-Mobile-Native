@@ -22,6 +22,8 @@
 - 应用更新：设置页检查 `baiye0/Town-Mobile-Native` 的 GitHub 最新正式 Release。Android 可下载 Release 中的 APK 并交给系统安装器；iOS 打开 Release 发布页，实际安装通过 TestFlight 或 App Store 完成。
 - iOS 16 及以上；iOS 26 使用原生 Liquid Glass，可在设置关闭并恢复普通按钮、开关与导航，旧系统自动使用普通界面；Android 原生 Compose。Android 本机 Portal（更多 → 本机 Portal）提供文件、搜索、网页获取、可选 Shell，以及按 Being 授权的日历、通讯录、提醒、分享、通知、位置和健康能力；构建与边界见 [Android Portal](docs/ANDROID-PORTAL.md) 和 [原生能力](docs/ANDROID-PORTAL-NATIVE.md)。Grove、桌面 Kit 和 App 管理入口未加入。
 
+iOS 现已提供 **更多 → 本机 Portal**：原生 WSS/MCP 连接、按 Being 隔离的工作区与文件导入导出、日历、提醒事项、通讯录、前台定位，以及 Apple 健康关联（活动、睡眠、心肺和身体指标等 26 类，只读共享）。系统权限结果与 Being 访问许可分别展示，拒绝后提供设置入口。原生写入需在手机确认，前后台切换会暂停/恢复连接。功能范围、与 Android 的差异及 nanoMuse 参考见 [iOS Portal](docs/IOS-PORTAL.md)。
+
 ## 视觉与文案来源
 
 配色来自 `Town-Client/desktop/renderer/app/styles.css`；欢迎页来自 `desktop/renderer/app/page.tsx`；Town 功能名称与描述来自 `desktop/renderer/town/models/town.ts`。不显示操作提示。

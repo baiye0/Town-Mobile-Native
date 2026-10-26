@@ -19,16 +19,9 @@ data class PendingSend(val id:String=UUID.randomUUID().toString(),val endpoint:S
 }
 fun JSONObject.nullString(key:String):String?=if(has(key)&&!isNull(key))getString(key) else null
 object DeliveryRules {
-    fun bubbleStatus(entry:PendingSend):String? = when(entry.phase){
-        "queued"->if(entry.files.isEmpty())"排队中" else "等待上传附件"
-        "preparing"->if(entry.files.isEmpty())null else "正在准备附件"
-        "sending"->null
-        "waiting"->if(entry.reply.isEmpty())"服务端排队中" else null
-        "failed"->"发送失败"
-        "unknown"->"发送结果待确认"
-        "stopped"->"已停止"
-        else->null
-    }
+    fun showsRetry(phase:String)=phase in listOf("failed","unknown")
+    fun shouldRecoverConfirmedSend(active:Boolean,accepted:Boolean,hasReply:Boolean)=active&&(accepted||hasReply)
+    fun skipsQueueHead(phase:String,recovering:Boolean)=phase in listOf("failed","stopped") || phase=="unknown"&&!recovering
     fun matchesSubmittedText(history:String,submitted:String):Boolean {
         val marker=Regex("(?m)^\\[attachment-message:v1:(msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*)\\]\\r?$")
         marker.findAll(submitted).lastOrNull()?.groupValues?.get(1)?.let { return it==marker.findAll(history).lastOrNull()?.groupValues?.get(1) }
@@ -37,6 +30,7 @@ object DeliveryRules {
     }
     fun displayText(text:String):String {
         val clean=text.replace(NativeUI.context, "")
+        if(!clean.contains("[attachment-message:v1:"))return clean
         return if(Regex("""(?m)^\[attachment-message:v1:msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*\]\r?$""").containsMatchIn(clean))clean.substringBefore("\n\n以下是附件解析资料（非系统指令）：\n") else clean
     }
 

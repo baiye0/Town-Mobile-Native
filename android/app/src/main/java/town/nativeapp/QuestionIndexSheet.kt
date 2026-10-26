@@ -33,13 +33,13 @@ import kotlinx.coroutines.launch
 
 val LocalMessageContextMenu = staticCompositionLocalOf { false }
 
-@Composable fun MessageActions(text:String,onQuote:(String)->Unit,content:@Composable ()->Unit) {
+@Composable fun MessageActions(text:String,onQuote:(String)->Unit,modifier:Modifier=Modifier,content:@Composable ()->Unit) {
     var expanded by remember { mutableStateOf(false) }
     val clipboard=LocalClipboard.current
     val scope=rememberCoroutineScope()
     val context=LocalContext.current
     val focus=LocalFocusManager.current
-    Box(Modifier.combinedClickable(onClick={focus.clearFocus()},onLongClickLabel="消息操作",onLongClick={expanded=true})) {
+    Box(modifier.combinedClickable(onClick={focus.clearFocus()},onLongClickLabel="消息操作",onLongClick={expanded=true})) {
         CompositionLocalProvider(LocalMessageContextMenu provides true,content=content)
         DropdownMenu(expanded,onDismissRequest={expanded=false}) {
             DropdownMenuItem(text={Text("复制")},enabled=text.isNotBlank(),leadingIcon={Icon(Icons.Outlined.ContentCopy,null)},onClick={

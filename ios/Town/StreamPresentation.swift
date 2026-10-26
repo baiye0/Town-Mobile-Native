@@ -1,45 +1,32 @@
 import Foundation
 
-/// Coalesces token bursts into at most one UI update per 50 ms, without dropping
-/// any stream data. Flush the last snapshot on completion, failure or cancel.
+/// Publish the first packet immediately, then at most once per display frame.
+/// Every snapshot contains all received text; this never simulates typing.
 @MainActor final class StreamPresentation {
     private var pending: PendingSend?
     private var task: Task<Void, Never>?
     private let publish: (PendingSend) -> Void
-
     init(publish: @escaping (PendingSend) -> Void) { self.publish = publish }
-
     func submit(_ entry: PendingSend) {
+        guard task != nil else {
+            publish(entry)
+            task = Task { [weak self] in
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+                    guard let self else { return }
+                    guard let next = self.pending else { self.task = nil; return }
+                    self.pending = nil
+                    self.publish(next)
+                }
+            }
+            return
+        }
         pending = entry
-        guard task == nil else { return }
-        task = Task { [weak self] in
-            do { try await Task.sleep(for: .milliseconds(50)) }
-            catch { return }
-            self?.flush()
-        }
     }
-
     func flush() {
-        task?.cancel()
-        task = nil
+        task?.cancel(); task = nil
         guard let entry = pending else { return }
-        pending = nil
-        publish(entry)
+        pending = nil; publish(entry)
     }
-
     deinit { task?.cancel() }
-}
-
-// Parse bytes away from the main actor; only complete SSE frames cross to UI
-// state. Awaiting each handler provides backpressure and preserves event order.
-enum SSETransport {
-    nonisolated static func read(_ bytes: URLSession.AsyncBytes,
-                                 onEvent: @MainActor (SSEEvent) throws -> Void) async throws {
-        var parser = SSEByteParser()
-        for try await byte in bytes {
-            try Task.checkCancellation()
-            if let event = try parser.consume(byte) { try await onEvent(event) }
-        }
-        if let event = parser.finish() { try await onEvent(event) }
-    }
 }

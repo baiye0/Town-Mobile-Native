@@ -17,6 +17,12 @@ final class LocalHistoryServer {
     private var replyText = ""
     private var streamID = ""
     private var sent: [String] = []
+    private var chatFailures: [(status: Int, persistUser: Bool)] = []
+    private var deliveryFixture = false
+    private var replayChat = false
+    private var replayEvents: [[String: Any]] = []
+    private var replayFinished = false
+    private var aheadReplySequence: Int?
     private var imageRequests: [String] = []
     var imageURL: String { endpoint + "/markdown-preview?token=signed%2Bvalue%2Fpart&expires=123" }
     var capturedImageRequests: [String] { lock.lock(); defer { lock.unlock() }; return imageRequests }
@@ -45,12 +51,35 @@ final class LocalHistoryServer {
     var sentMessages: [String] { lock.lock(); defer { lock.unlock() }; return sent }
     func enableChat(staged: Bool = false) { lock.lock(); chatEnabled = true; stagedChat = staged; lock.unlock() }
 
+    func enableReplayChat() { lock.lock(); chatEnabled = true; replayChat = true; lock.unlock() }
+
+    func resumeAcceptedReplyAsReplay() {
+        queue.sync {
+            replayChat = true; replayFinished = false; replayEvents = []
+            replyText = ""; streamID = UUID().uuidString
+        }
+    }
+
+    func failNextChat(status: Int, persistUser: Bool = false) {
+        lock.lock(); defer { lock.unlock() }
+        chatFailures.append((status, persistUser)); deliveryFixture = true
+    }
+
     func emitProgress(_ type: String, _ fields: [String: Any]) {
         queue.async { self.emit(type, fields) }
     }
 
     func appendReply(_ text: String) {
         queue.async { self.replyText += text; self.emit("content_block_delta", ["delta": ["text": text]]) }
+    }
+
+    func publishHistoryAhead(_ text: String) {
+        queue.async {
+            self.lock.lock(); defer { self.lock.unlock() }
+            let sequence = 61 + self.chatRows.count
+            self.aheadReplySequence = sequence
+            self.chatRows.append(["seq": sequence, "role": "assistant", "scene_id": self.chatScene, "content": text])
+        }
     }
 
     func nextReply() {
@@ -64,9 +93,10 @@ final class LocalHistoryServer {
 
     func finishReply() {
         queue.async {
-            guard self.stream != nil else { return }
+            guard self.stream != nil || self.replayChat && !self.replayFinished else { return }
             self.persistReply()
             self.emit("message_stop", [:])
+            self.replayFinished = true
             self.sendChunk("data: [DONE]\n\n")
             let stream = self.stream
             self.stream = nil
@@ -79,14 +109,21 @@ final class LocalHistoryServer {
     private func persistReply() {
         guard !replyText.isEmpty else { return }
         lock.lock()
-        let sequence = 61 + chatRows.count
-        chatRows.append(["seq": sequence, "role": "assistant", "scene_id": chatScene, "content": replyText])
+        let sequence = aheadReplySequence ?? (61 + chatRows.count)
+        let row: [String: Any] = ["seq": sequence, "role": "assistant", "scene_id": chatScene, "content": replyText]
+        if let i = chatRows.firstIndex(where: { $0["seq"] as? Int == sequence }) { chatRows[i] = row }
+        else { chatRows.append(row) }
+        aheadReplySequence = nil
         lock.unlock()
         emit("meta", ["persisted": ["kind": "self", "from": "final", "seq": sequence, "stream_id": streamID]])
     }
 
     private func emit(_ type: String, _ fields: [String: Any]) {
         var fields = fields; fields["scene_id"] = chatScene
+        if replayChat {
+            replayEvents.append(["seq": replayEvents.count + 1, "event": type, "data": fields])
+            return
+        }
         let data = try! JSONSerialization.data(withJSONObject: fields)
         sendChunk("event: \(type)\ndata: \(String(decoding: data, as: UTF8.self))\n\n")
     }
@@ -103,10 +140,22 @@ final class LocalHistoryServer {
         let prompt = payload["message"] as? String ?? ""
         lock.lock()
         sent.append(prompt)
-        chatRows.append(["seq": 61 + chatRows.count, "role": "user", "scene_id": chatScene, "content": prompt])
+        let failure = chatFailures.isEmpty ? nil : chatFailures.removeFirst()
+        if failure == nil || failure?.persistUser == true {
+            chatRows.append(["seq": 61 + chatRows.count, "role": "user", "scene_id": chatScene, "content": prompt])
+        }
         lock.unlock()
-        stream = connection
+        if let failure {
+            let response = "HTTP/1.1 \(failure.status) Fixture failure\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() }); return
+        }
         streamID = UUID().uuidString
+        if replayChat {
+            replyText = ""; replayEvents = []; replayFinished = false
+            connection.send(content: Data("HTTP/1.1 202 Accepted\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}".utf8), completion: .contentProcessed { _ in connection.cancel() })
+            return
+        }
+        stream = connection
         connection.send(content: Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in })
         emit("meta", ["stream_id": streamID])
         lock.lock(); let staged = stagedChat; lock.unlock()
@@ -155,6 +204,19 @@ final class LocalHistoryServer {
                 return
             }
             self.lock.lock(); let chat = self.chatEnabled; self.lock.unlock()
+            self.lock.lock(); let deliveryFixture = self.deliveryFixture; self.lock.unlock()
+            if self.replayChat, headers.contains("/api/stream/active") {
+                let route = headers.components(separatedBy: " ").dropFirst().first ?? ""
+                let after = Int(URLComponents(string: route)?.queryItems?.first { $0.name == "after" }?.value ?? "0") ?? 0
+                let payload: [String: Any] = ["stream_id": self.streamID, "scene_id": self.chatScene,
+                    "finished": self.replayFinished, "events": self.replayEvents.filter { ($0["seq"] as? Int ?? 0) > after }]
+                let body = try! JSONSerialization.data(withJSONObject: payload)
+                let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+                connection.send(content: Data(header.utf8) + body, completion: .contentProcessed { _ in connection.cancel() }); return
+            }
+            if deliveryFixture, headers.contains("/api/stream/active") {
+                connection.send(content: Data("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in connection.cancel() }); return
+            }
             if chat, headers.contains("/api/chat/stream") { self.openStream(connection, request: request); return }
             if chat, headers.contains("/api/stop") {
                 self.persistReply()

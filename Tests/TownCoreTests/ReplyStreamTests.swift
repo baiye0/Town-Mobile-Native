@@ -2,6 +2,13 @@ import Foundation
 import Testing
 @testable import TownCore
 
+@Test func retryOfAcceptedActiveSendResumesInsteadOfDiscardingReply() {
+    #expect(DeliveryRules.shouldRecoverConfirmedSend(active: true, accepted: true, hasReply: false))
+    #expect(DeliveryRules.shouldRecoverConfirmedSend(active: true, accepted: false, hasReply: true))
+    #expect(!DeliveryRules.shouldRecoverConfirmedSend(active: true, accepted: false, hasReply: false))
+    #expect(!DeliveryRules.shouldRecoverConfirmedSend(active: false, accepted: true, hasReply: true))
+}
+
 private func pending() -> PendingSend {
     PendingSend(endpoint: "https://example.invalid", sceneID: "s", title: "s", text: "question", baseline: 10)
 }
@@ -89,18 +96,18 @@ private func pending() -> PendingSend {
     #expect(!ReplyStream.hasFinalReply(entry))
 }
 
-@Test func ordinarySendHasNoSendingBadgeButFailuresRemainActionable() {
-    var entry = pending()
-    for phase in ["preparing", "sending"] {
-        entry.phase = phase
-        #expect(DeliveryRules.bubbleStatus(entry) == nil)
+@Test func deliveryIndicatorsAndQueueSelectionKeepUnconfirmedSendsIndependent() {
+    for phase in ["queued", "preparing", "sending", "waiting"] {
+        #expect(!DeliveryRules.showsRetry(phase))
+        #expect(!DeliveryRules.skipsQueueHead(phase, recovering: false))
     }
-    for phase in ["queued", "waiting", "failed", "unknown", "stopped"] {
-        entry.phase = phase
-        #expect(DeliveryRules.bubbleStatus(entry) != nil)
+    for phase in ["failed", "unknown"] {
+        #expect(DeliveryRules.showsRetry(phase))
+        #expect(DeliveryRules.skipsQueueHead(phase, recovering: false))
     }
-    entry.phase = "waiting"; entry.reply = "already replying"
-    #expect(DeliveryRules.bubbleStatus(entry) == nil)
+    #expect(!DeliveryRules.skipsQueueHead("unknown", recovering: true))
+    #expect(DeliveryRules.skipsQueueHead("stopped", recovering: true))
+    #expect(!DeliveryRules.showsRetry("stopped"))
 }
 
 @Test func idleTimeoutOnlyResetsForProgressInTheCurrentScene() {

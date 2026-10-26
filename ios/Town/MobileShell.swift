@@ -27,6 +27,7 @@ struct MobileShell: View {
     @AppStorage("glassEffects") private var glass = true
     @StateObject private var social = SocialStore()
     @State private var drag: CGFloat = 0
+    @State private var retainSidebar = false
     @State private var search = ""
     @FocusState private var sidebarSearchFocused: Bool
     @State private var renameID: String?
@@ -65,22 +66,21 @@ struct MobileShell: View {
                     }
                 }
                 .offset(x: progress)
-                .overlay {
-                    if progress > 0 {
-                        Color.black.opacity(0.32 * progress / width).ignoresSafeArea().offset(x: progress)
-                            .onTapGesture { close() }
-                            .gesture(DragGesture().onChanged { drag = min(0, $0.translation.width) }.onEnded { finish($0, width) })
-                            .transition(.opacity).accessibilityHidden(true)
-                    }
-                }
                 .accessibilityHidden(nav.sidebar)
-                if progress > 0 {
+                Color.black.opacity(0.32 * progress / width).ignoresSafeArea().offset(x: progress)
+                    .onTapGesture { close() }
+                    .gesture(DragGesture().onChanged { drag = min(0, $0.translation.width) }.onEnded { finish($0, width) })
+                    .allowsHitTesting(progress > 0)
+                    .accessibilityHidden(true)
+                if progress > 0 || retainSidebar {
+                    // Retain the same layer until its closing slide finishes, then
+                    // remove it without a second transition or offscreen controls.
                     sidebar.frame(width: width).frame(maxHeight: .infinity).background(ClientTheme.background)
                         .shadow(color: .black.opacity(0.08 * progress / width), radius: 20, x: 8)
                         .offset(x: progress - width)
-                        // Explicitly slide the removed view offscreen. The default
-                        // opacity transition leaves a fading copy over the chat.
-                        .transition(.offset(x: -width))
+                        .allowsHitTesting(progress > 0)
+                        .accessibilityHidden(!nav.sidebar)
+                        .transition(.asymmetric(insertion: .move(edge: .leading), removal: .identity))
                         .zIndex(1)
                 }
                 if !nav.sidebar && nav.selected == "chat" {
@@ -89,15 +89,29 @@ struct MobileShell: View {
                         .accessibilityHidden(true)
                 }
             }.animation(reduceMotion ? nil : .interactiveSpring(response: 0.32, dampingFraction: 0.88), value: nav.sidebar)
+                .task(id: progress > 0) {
+                    if progress > 0 { retainSidebar = true }
+                    else {
+                        // Cancellation preserves the layer if the user opens it again.
+                        if !reduceMotion {
+                            do { try await Task.sleep(nanoseconds: 450_000_000) } catch { return }
+                        }
+                        guard !Task.isCancelled else { return }
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { retainSidebar = false }
+                    }
+                }
         }
         .environmentObject(nav).environmentObject(social)
         .sheet(isPresented: Binding(get: { nav.sceneSheet != nil }, set: { if !$0 { nav.sceneSheet = nil } })) {
             if nav.sceneSheet == "details" { SceneDetails() } else { SceneEditor(binding:nav.sceneSheet == "bind") }
         }
-        .task { social.startLive(); store.resumeDelivery(); CompletionNotifications.shared.openScene = { endpoint, scene in if store.connection?.endpoint == endpoint { store.selectScene(scene); nav.selected = "chat" } }; if let (endpoint, scene) = CompletionNotifications.shared.pending { CompletionNotifications.shared.openScene?(endpoint, scene); CompletionNotifications.shared.pending = nil } }
+        .task { IOSPortalStore.shared.bind(store.connection); social.startLive(); store.resumeDelivery(); CompletionNotifications.shared.openScene = { endpoint, scene in if store.connection?.endpoint == endpoint { store.selectScene(scene); nav.selected = "chat" } }; if let (endpoint, scene) = CompletionNotifications.shared.pending { CompletionNotifications.shared.openScene?(endpoint, scene); CompletionNotifications.shared.pending = nil } }
         .onChange(of: nav.selected) { value in store.chatVisible = value == "chat" }
         .onChange(of: nav.sidebar) { opened in if !opened { sidebarSearchFocused = false } }
-        .onChange(of: phase) { phase in store.appActive = phase == .active; if phase == .active { social.startLive(); store.resumeDelivery() } else { social.stopLive() } }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in IOSPortalStore.shared.suspend() }
+        .onChange(of: phase) { phase in if phase == .active { IOSPortalStore.shared.resume() }; store.appActive = phase == .active; if phase == .active { social.startLive(); store.resumeDelivery() } else { social.stopLive() } }
         .alert("删除场景？", isPresented: Binding(get: { deletingID != nil },set: { if !$0 { deletingID = nil } })) {
             Button("取消",role:.cancel) { deletingID = nil }
             Button("确认删除",role:.destructive) { if let id = deletingID { store.delete(id) }; deletingID = nil }

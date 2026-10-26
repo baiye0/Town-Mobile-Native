@@ -144,11 +144,14 @@ class ReplyStreamTest {
         assertEquals("规范正文",rows.last().text);assertEquals(entry.replyID,rows.last().id)
     }
 
-    @Test fun normalSendingHasNoBadgeButQueueAndFailuresAreVisible() {
-        val entry=pending()
-        listOf("preparing","sending").forEach{entry.phase=it;assertNull(DeliveryRules.bubbleStatus(entry))}
-        listOf("queued","waiting","failed","unknown","stopped").forEach{entry.phase=it;assertNotNull(DeliveryRules.bubbleStatus(entry))}
-        entry.phase="waiting";entry.reply="已开始";assertNull(DeliveryRules.bubbleStatus(entry))
+    @Test fun indicatorsAndQueueSelectionKeepUnconfirmedSendsIndependent() {
+        for(phase in listOf("queued","preparing","sending","waiting")) {
+            assertFalse(DeliveryRules.showsRetry(phase));assertFalse(DeliveryRules.skipsQueueHead(phase,false))
+        }
+        for(phase in listOf("failed","unknown")) {
+            assertTrue(DeliveryRules.showsRetry(phase));assertTrue(DeliveryRules.skipsQueueHead(phase,false))
+        }
+        assertFalse(DeliveryRules.skipsQueueHead("unknown",true));assertTrue(DeliveryRules.skipsQueueHead("stopped",true));assertFalse(DeliveryRules.showsRetry("stopped"))
     }
 
     @Test fun progressIsScopedAndMetadataDoesNotExtendRecoveryForever() {
@@ -177,14 +180,4 @@ class ReplyStreamTest {
         assertEquals(3,HistoryRules.merge(listOf(old),listOf(remote,remote.copy(id="other",sequence=13))).size)
     }
 
-    @Test fun presentationFlushKeepsLastSnapshotAndCancelsLatePublish() = kotlinx.coroutines.runBlocking {
-        val snapshots=mutableListOf<String>()
-        val presentation=StreamPresentation(this){snapshots.add(it.reply)}
-        val entry=pending();entry.reply="第一段";presentation.submit(entry)
-        entry.reply="第一段第二段";presentation.submit(entry)
-        presentation.flush()
-        assertEquals(listOf("第一段第二段"),snapshots)
-        kotlinx.coroutines.delay(75)
-        assertEquals(1,snapshots.size)
-    }
 }

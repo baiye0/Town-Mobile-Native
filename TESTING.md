@@ -1,5 +1,13 @@
 # iOS 提交前 Review（2026-10-21）
 
+## 2026-10-23 全量改动发布 Review：0.1.0（7）
+
+- 本轮审查覆盖聊天/生图及新增 iOS Portal、系统权限、HealthKit。修复已受理发送的恢复记录过早删除、Portal 文件查询占用主线程、定位权限同步查询三处问题；详见 [发布 Review](docs/RELEASE-REVIEW-2026-10-23.md)。
+- Swift Core 82 项、Android 81 项 + Lint + Debug APK、iOS TownTests 39 项、UI 13 项全部通过。iOS 初次启动挂起及重启后定位 fixture 坐标偏差已明确排除，最终 39 项无失败和跳过。
+- iOS Release 归档、App Store / 开发签名 IPA、源码一致性、签名和 dSYM 校验通过。最终包 18:24 覆盖安装手机，18:25 启动成功，设备确认 0.1.0（7）；没有清除账号或聊天数据。
+- 真机验证范围为安装、启动和进程存活；未使用用户生产身份发送测试对话、触发生图或读取个人健康记录。TestFlight 最终状态见 [发布记录](docs/TESTFLIGHT-0.1.0.md)。
+
+
 - Review 覆盖本轮布局、侧栏、Markdown 图片、统一图片预览、智能界面宿主、上下文展示过滤和发送队列集成；Android 与 Portal 未修改。
 - 修复对话切换时用“有无选择”推断智能 UI 开关的问题：开关按 Being/场景独立保存，保留用户显式开启和关闭的意图。状态回归覆盖无选择时开启、有选择时关闭、往返切换和重选当前场景。
 - 修复大写 `INTELLIGENT-UI` 围栏显示正常却未参与 surface 历史与选择回传的问题；完整交互用例改用大写初始围栏，验证刷新恢复、当前选择发送和后续小写 patch 更新。
@@ -308,3 +316,70 @@ xcodebuild -project ios/Town.xcodeproj -scheme Town -sdk iphonesimulator \
 ```
 
 Android 使用 JDK 21 和 SDK 36。真机在 Xcode 选择自己的 Development Team。模拟器不能用 CODE_SIGNING_ALLOWED=NO，否则钥匙串权限不正确。
+
+## 2026-10-23：iOS 本机 Portal
+
+新增原生 Swift Portal，入口为“更多 → 本机 Portal”。实现及平台边界见
+[IOS-PORTAL.md](docs/IOS-PORTAL.md)。参考 Android 的固定版本 relay 协议和 nanoMuse
+的原生能力/权限设计；未引入外部运行时或第三方源码。
+
+### 验证范围
+
+- `swift test`：67 项通过，新增 4 项覆盖 relay URL/身份隔离、设备名与请求指纹、
+  路径穿越/绝对路径/悬空和父级符号链接、导入大小/同名保护、字面搜索。
+  工作区统一使用物理路径，修复 Foundation `/var` 与枚举结果 `/private/var` 别名不一致。
+- iOS 26.5 独立模拟器 `Town Portal Isolated QA`：26 项 TownTests + 2 项 Portal 页面测试通过。
+  覆盖 loopback **真实 URLSession WebSocket** 握手、MCP 初始化和文件写读、后台暂停/恢复、
+  切换身份停止、握手拒绝且不回显服务端内容、损坏配置拒绝访问、写入中断恢复为 unknown。
+- 正向系统测试在隔离模拟器上授予日历、提醒、联系人和定位权限：创建唯一命名的合成数据，
+  验证待确认阶段没有写入、确认后创建、相同 request_id 去重、参数冲突拒绝、撤权取消、
+  目标记录变化拒绝旧操作、提醒完成和删除。定位使用 `31.2304,121.4737` 模拟坐标。
+  测试清理合成记录，原生正向用例拒绝在真机执行。
+- iOS 16.4 独立模拟器 `Town Portal iOS 16 QA`：10 项 Portal 单元/集成测试 + 2 项 UI 测试通过，
+  包含已授权的原生正向测试。旧系统采用普通展开按钮，避免 DisclosureGroup 的可访问性差异。
+- UI 测试覆盖：未连接禁用启动、已连接启停/设备名锁定、展开权限、工作区入口；
+  已导出并查看页面截图。iOS 26.5 的读写开关与系统授权独立显示。
+- `git diff --check` 通过。iOS 工程仍支持最低 iOS 16，无新增 Swift Package 或 native 构建依赖。
+
+### 产物与未覆盖项
+
+测试构建位于 `artifacts/PortalDerivedData/`；本轮日志和截图汇总在
+`artifacts/ios-portal-qa/`（均为本地产物，不纳入 Git）。
+
+未使用真实 Being 凭据或发送真实消息；真实公网 relay、设备睡眠/长时间网络切换、
+真实系统权限弹窗及拒绝恢复、iOS 部分联系人、大致定位、账号同步、提醒通知交付、
+系统文件选择器云盘下载与大文件导出仍需真机端到端验收。模拟器权限由 `simctl privacy`
+授予，不能证明真实权限申请弹窗已验收。iOS 不保证后台常驻；未宣告未实现的 Shell、
+网页抓取、通知读取、地点提醒、分享扩展等能力。健康数据已在下述补充实现。
+
+## 2026-10-23：授权修复与 HealthKit
+
+- 修复未等待系统权限就保存开启状态的问题；定位等待 delegate 回调。拒绝后保持关闭，已拒绝的权限提供系统设置入口，返回前台清除失效授权。
+- HealthKit 只读开放活动、睡眠、锻炼、心肺和身体指标共 26 类；使用“关联 Apple 健康”直接唤起系统共享选择页，完成后关联当前 Being；提供断开入口，不再使用逐类授权按钮或开关。系统流程成功不视为读取授权成功，空结果不视为零。健康返回值不写入 Portal 日志或磁盘。
+- 新增 9 项 `IOSPortalPermissionTests`：拒绝/设置恢复、等待系统结果、授权中切换 Being、撤销中的授权回调、旧配置修复、关联入口发起系统共享选择并准确区分关联状态与系统读取状态、取消流程、跨身份隔离、查询中撤销、时间范围及单位转换。
+- `swift test` 67 项通过；iOS 26.5 共 34 项 TownTests 通过；原有 2 项 Portal UI 测试通过。新增真实日历拒绝弹窗 UI 测试通过；健康关联及断开见最终回归记录。
+- 正向定位测试需先启动指定模拟器并设置合成坐标，使用 `-parallel-testing-enabled NO`，避免 Xcode 的克隆设备丢失坐标。原生 EventKit 延迟初始化，测试结束释放 store，避免大量测试实例耗尽系统连接。
+- iOS 16.4 的 9 项新增授权及契约测试通过。
+- iOS 设备 Debug 构建通过，已覆盖安装并启动在连接的 iPhone 16 Pro Max 上。签名产物确认包含 `com.apple.developer.healthkit`，未申请健康写入或后台交付 entitlement。
+- 尚未在用户手机上读取真实健康记录，也未代替用户选择系统健康权限；真实 Being 公网数据交付仍需用户连接后验收。
+
+### 参数契约修复（0.2.0-ios）
+
+用户反馈旧 `portal_ios_health` 仅返回“参数缺失或包含不支持的字段”。原因是旧接口强制 category/start/end，统一错误没有给出缺项和契约，尚未进入 HealthKit 查询。
+新接口只要求 category，默认最近 7 天；capabilities 返回 schema、类别、单位、示例，校验错误提供具体诊断。
+增加契约回归测试（错误字段、缺失 category、有效最小参数、默认日期、类别唯一性、血氧百分比换算）以及隔离模拟器全部 26 类 HealthKit 实际查询测试。
+
+最终验证：
+- iOS 26.5：9 项授权/契约单元测试 + 1 项实际 HealthKit 查询测试通过；24 类真实系统查询返回有效结构。当前模拟器不在共享选择页提供血压两项，这两项返回系统错误 5；用例明确核对该限制，不把错误伪造成空数据或全量成功。
+- UI：健康关联说明卡片、取消、系统选择页、拒绝与系统“好”确认、允许全部共享、显示关联状态、断开关联均通过。截图导出并检查。
+- iOS 16.4：9 项授权/契约回归通过。纯核心 `swift test` 67 项通过。最终设备构建通过，0.2.0-ios 已覆盖安装到 iPhone 16 Pro Max。
+- 最终日志：`artifacts/ios-portal-qa/town-health-native-complete.log`、`town-health-positive-ui.log`、`town-health-expanded-verified.log`（早期组合测试包含前置权限未完成的失败，后续已单独完成实际查询测试）、`town-health-expanded-ios16.log`。
+- 原生查询 QA 必须先在同一隔离模拟器运行 `CompatibilityUITests/testPortalHealthSuccessfulConnection`，再运行 `IOSPortalTests/testHealthKitQueriesAllSupportedTypesOnIsolatedSimulator`；未准备系统选择时后者跳过。未验证用户手机非空健康记录，也未向真实 Being 传输个人健康数据。
+
+### 健康“继续”后结果页修复
+
+- 移除健康关联请求结束后无条件关闭说明页的逻辑；完成保留结果和共享范围修改指引，用户点“完成”再退出。失败保留提示与重试入口。
+- `connectHealth` 返回实际流程结果：系统请求异常、身份变化、保存失败均不显示完成；已有健康关联不能掩盖本次请求失败。
+- iOS 26.5：11 项授权/契约单元测试及 2 项系统权限 UI 测试通过。覆盖请求取消、已关联时重试失败、配置保存失败，以及首次允许、拒绝、重复请求直接返回时结果页仍可见。
+- 设备 Debug 构建通过，已覆盖安装并启动到连接的 iPhone 16 Pro Max。没有读取真实手机健康记录。
+- 日志：`artifacts/ios-portal-qa/town-health-visible-result.log`、`town-health-visible-result-device.log`；截图位于 `health-visible-result-screenshots/`。

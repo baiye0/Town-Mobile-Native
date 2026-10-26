@@ -25,10 +25,6 @@ struct ChatRunView: View {
             if expanded {
                 Text(process).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("runProcessDetails")
-            } else if isActive && !process.isEmpty {
-                Text(String(process.suffix(240)).trimmingCharacters(in: .whitespacesAndNewlines))
-                    .lineLimit(3).truncationMode(.head)
-                    .accessibilityIdentifier("liveProcessPreview")
             }
         }.font(.caption).foregroundStyle(ClientTheme.secondary)
             .padding(.vertical, 10)

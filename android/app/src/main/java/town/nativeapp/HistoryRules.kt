@@ -62,8 +62,34 @@ object HistoryRules {
         confirmed.forEach { row -> row.sequence?.let { seq -> indexed[seq]=indexed[seq]?.let{bind(row,it)} ?: row } }
         val known=local.mapNotNull{it.sequence}.toSet()
         val echoes=confirmed.filter{it.sequence!=null&&it.sequence !in known}.sortedBy{it.sequence}.toMutableList()
+        val localByID=local.associateBy{it.id}
+        fun promptStart(message:Message):Int? {
+            val prompt=localByID[message.replyTo] ?: return null
+            val baseline=message.localBaseline ?: return null
+            val prompts=confirmed.filter{it.role=="user"&&it.sceneID==prompt.sceneID&&(it.sequence ?: 0)>baseline&&DeliveryRules.matchesSubmittedText(it.text,prompt.text)}
+            return prompt.sequence ?: prompts.singleOrNull()?.sequence
+        }
+        fun liveEcho(message:Message):Message? {
+            val start=promptStart(message) ?: return null
+            val end=indexed.values.filter{it.role=="user"&&it.sceneID==message.sceneID&&(it.sequence ?: 0)>start}.mapNotNull{it.sequence}.minOrNull() ?: Int.MAX_VALUE
+            val previous=localByID[message.localAfter]?.sequence ?: start
+            val candidates=indexed.values.filter{remote->remote.role=="being"&&remote.kind==null&&remote.sceneID==message.sceneID&&
+                (remote.sequence ?: 0)>maxOf(start,previous)&&(remote.sequence ?: 0)<end&&(remote.replyTo==null||remote.id==message.id)&&
+                message.text.isNotEmpty()&&remote.text.isNotEmpty()&&(remote.text==message.text||message.streaming==true&&(remote.text.startsWith(message.text)||message.text.startsWith(remote.text)))}
+            val candidate=candidates.singleOrNull() ?: return null
+            val competing=local.count{it.sequence==null&&it.replyTo==message.replyTo&&it.text.isNotEmpty()&&
+                (candidate.text==it.text||it.streaming==true&&(candidate.text.startsWith(it.text)||it.text.startsWith(candidate.text)))}
+            return candidate.takeIf{competing==1}
+        }
         val pending=local.filter { row ->
             if(row.sequence!=null||(role(row.role)=="being"&&row.text.isBlank()))false else {
+                val live=liveEcho(row)
+                if(live!=null) {
+                    indexed[live.sequence!!]=bind(live,row)
+                    echoes.removeAll{it.sequence==live.sequence}
+                    return@filter false
+                }
+                if(promptStart(row)!=null)return@filter true
                 val match=echoes.indexOfFirst { remote ->
                     role(remote.role)==role(row.role)&&remote.sceneID==row.sceneID&&
                         (row.localBaseline==null||remote.sequence!!>row.localBaseline)&&DeliveryRules.matchesSubmittedText(remote.text,row.text)

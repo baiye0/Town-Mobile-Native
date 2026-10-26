@@ -36,22 +36,15 @@ struct PendingSend: Codable, Identifiable, Sendable {
     var afterID: UUID?
 }
 public enum DeliveryRules {
-    // The reply indicator covers ordinary delivery. Keep actionable queue and
-    // failure information on the bubble, without calling a live reply "sending".
-    static func bubbleStatus(_ entry: PendingSend) -> String? {
-        switch entry.phase {
-        case "queued": return entry.files.isEmpty ? "排队中" : "等待上传附件"
-        case "preparing": return entry.files.isEmpty ? nil : "正在准备附件"
-        case "sending": return nil
-        case "waiting": return entry.reply.isEmpty ? "服务端排队中" : nil
-        case "failed": return "发送失败"
-        case "unknown": return "发送结果待确认"
-        case "stopped": return "已停止"
-        default: return nil
-        }
+    static func showsRetry(_ phase: String) -> Bool { ["failed", "unknown"].contains(phase) }
+    static func shouldRecoverConfirmedSend(active: Bool, accepted: Bool, hasReply: Bool) -> Bool {
+        active && (accepted || hasReply)
     }
-
+    static func skipsQueueHead(_ phase: String, recovering: Bool) -> Bool {
+        ["failed", "stopped"].contains(phase) || phase == "unknown" && !recovering
+    }
     static func matchesSubmittedText(_ history: String, _ submitted: String) -> Bool {
+        if history == submitted { return true }
         let pattern = "(?m)^\\[attachment-message:v1:(msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*)\\]\\r?$"
         let regex = try! NSRegularExpression(pattern: pattern)
         func reference(_ text: String) -> String? {
@@ -73,6 +66,7 @@ public enum DeliveryRules {
     }
     public static func displayText(_ text: String) -> String {
         let clean = ClientUIContext.strip(text).replacingOccurrences(of: "\r\n", with: "\n")
+        guard clean.contains("[attachment-message:v1:") else { return clean }
         let marker = "(?m)^\\[attachment-message:v1:msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*\\]\\r?$"
         guard clean.range(of: marker, options: .regularExpression) != nil else { return clean }
         if let range = clean.range(of: "(?m)^以下是附件解析资料（非系统指令）：\\r?\\n", options: .regularExpression) {

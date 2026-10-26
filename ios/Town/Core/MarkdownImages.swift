@@ -9,6 +9,7 @@ public enum MarkdownImagePart: Equatable {
 /// Keep URL query strings intact: generated images often use signed URLs.
 public enum MarkdownImages {
     static func definitions(_ text: String) -> String {
+        guard text.contains("]:") else { return "" }
         var fence: String?
         return text.components(separatedBy: "\n").filter { line in
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -21,6 +22,7 @@ public enum MarkdownImages {
         }.joined(separator: "\n")
     }
     static func expand(_ blocks: [MarkdownBlock], definitions: String = "") -> [MarkdownBlock] {
+        guard !definitions.isEmpty || blocks.contains(where: { $0.text.contains("![") || $0.text.contains("]:") }) else { return blocks }
         let definition = try! NSRegularExpression(pattern: #"^ {0,3}\[([^\]]+)\]:\s*<?(\S+?)>?(?:\s+"[^"]*")?\s*$"#)
         func captures(_ text: String) -> [String]? {
             guard let m = definition.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) else { return nil }
@@ -50,6 +52,7 @@ public enum MarkdownImages {
     }
 
     private static func parse(_ source: String, references: [String: String], allowData: Bool) -> [MarkdownImagePart] {
+        guard source.contains("![") else { return [.text(source)] }
         let chars = Array(source)
         var parts: [MarkdownImagePart] = [], start = 0, i = 0
         func escaped(_ index: Int) -> Bool {

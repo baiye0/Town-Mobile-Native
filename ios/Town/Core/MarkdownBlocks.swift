@@ -8,8 +8,14 @@ public struct MarkdownBlock: Equatable {
     public var rows: [[String]] = []
 }
 public enum MarkdownBlocks {
+    private static let patterns: [String: NSRegularExpression] = Dictionary(uniqueKeysWithValues: [
+        "^\\s*\\|?\\s*:?-{3,}:?\\s*(\\|\\s*:?-{3,}:?\\s*)+\\|?\\s*$",
+        "^(#{1,6})\\s+(.+)$",
+        "^(?:[-*_]\\s*){3,}$",
+        "^(\\s*)([-+*]|[0-9]+[.)])\\s+(.+)$"
+    ].map { ($0, try! NSRegularExpression(pattern: $0)) })
     private static func match(_ pattern: String, _ line: String) -> [String]? {
-        guard let regex = try? NSRegularExpression(pattern:pattern), let m = regex.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) else { return nil }
+        guard let regex = patterns[pattern], let m = regex.firstMatch(in:line,range:NSRange(line.startIndex...,in:line)) else { return nil }
         return (0..<m.numberOfRanges).map { Range(m.range(at:$0),in:line).map { String(line[$0]) } ?? "" }
     }
     private static func cells(_ line: String) -> [String] {

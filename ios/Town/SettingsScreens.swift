@@ -30,6 +30,8 @@ struct MoreView: View {
                     SettingsDivider()
                     HistoryLink { ModelSettingsView() } label: { SettingsRow(title: "模型设置", icon: "cpu", subtitle: "线路、模型与思考深度") }
                     SettingsDivider()
+                    HistoryLink { IOSPortalView() } label: { SettingsRow(title: "本机 Portal", icon: "iphone.gen3.radiowaves.left.and.right", subtitle: "工作区 · 手机原生能力") }
+                    SettingsDivider()
                     HistoryLink { NotificationSettingsView() } label: { SettingsRow(title: "通知设置", icon: "bell") }
                     SettingsDivider()
                     HistoryLink { AppearanceSettingsView() } label: { SettingsRow(title: "外观", icon: "paintpalette", subtitle: appearanceTitle(appearance)) }

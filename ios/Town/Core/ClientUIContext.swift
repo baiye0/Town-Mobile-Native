@@ -4,6 +4,7 @@ import Foundation
 public enum ClientUIContext {
     public static func strip(_ source: String, capabilitiesOnly: Bool = false) -> String {
         let text = source.replacingOccurrences(of: "\r\n", with: "\n")
+        guard text.contains("[客户端") else { return text }
         let names = capabilitiesOnly ? ["客户端 Intelligent UI Beta 上下文"] :
             ["客户端 Intelligent UI Beta 上下文", "客户端当前界面选择", "客户端界面操作"]
         let lines = text.components(separatedBy: "\n")

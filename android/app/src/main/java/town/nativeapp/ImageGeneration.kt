@@ -17,6 +17,8 @@ data class GenerationSnapshot(val id: String, val status: String, val deadline: 
 object ImageGeneration {
     private val key = Regex("[A-Za-z0-9_-]{1,128}")
     private val id = Regex("gen_[A-Za-z0-9_-]{1,124}")
+    // Android JSONObject.getString coerces numbers/booleans, unlike the JVM test implementation.
+    private fun string(o: JSONObject, key: String): String { val value = o.get(key); require(value is String); return value }
     private fun exact(o: JSONObject, vararg keys: String) = o.keys().asSequence().toSet() == keys.toSet()
     private fun nullable(o: JSONObject, key: String): String? { val v = o.get(key); require(v == JSONObject.NULL || v is String && v.length <= 256); return v as? String }
     private fun integer(o: JSONObject, key: String): Long {
@@ -27,19 +29,19 @@ object ImageGeneration {
     fun parse(text: String): GenerationReceipt? = runCatching {
         require(text.length <= 65536 && StructuredText.detect(text) == "json")
         val o = JSONObject(text)
-        require(exact(o, "type", "version", "being_id", "jobs") && o.getString("type") == "being.image-generation" && o.get("version") == 1 && key.matches(o.getString("being_id")))
+        require(exact(o, "type", "version", "being_id", "jobs") && string(o, "type") == "being.image-generation" && o.get("version") == 1 && key.matches(string(o, "being_id")))
         val rows = o.getJSONArray("jobs"); require(rows.length() in 1..24)
         val jobs = (0 until rows.length()).map { i ->
             val j = rows.getJSONObject(i)
             require(exact(j, "index", "title", "submission", "generation_id", "client_request_id", "error_code") && j.get("index") == i + 1)
-            val title = j.getString("title"); val submission = j.getString("submission"); val gid = nullable(j, "generation_id"); val request = j.getString("client_request_id")
+            val title = string(j, "title"); val submission = string(j, "submission"); val gid = nullable(j, "generation_id"); val request = string(j, "client_request_id")
             require(title.isNotBlank() && title.length <= 200 && submission in listOf("accepted", "rejected", "unknown") && key.matches(request))
             require(gid == null || id.matches(gid)); require(submission != "accepted" || gid != null); require(submission != "rejected" || gid == null)
             GenerationJob(i + 1, title, submission, gid, request, nullable(j, "error_code"))
         }
         require(jobs.map { it.request }.distinct().size == jobs.size)
         val ids = jobs.mapNotNull { it.id }; require(ids.distinct().size == ids.size)
-        GenerationReceipt(o.getString("being_id"), jobs)
+        GenerationReceipt(string(o, "being_id"), jobs)
     }.getOrNull()
 
     /** Only top-level standalone JSON or permitted fences trigger read-only queries. */
@@ -82,22 +84,22 @@ object ImageGeneration {
         return result
     }
     fun snapshot(o: JSONObject, job: GenerationJob): GenerationSnapshot {
-        val gid = o.getString("id"); require(id.matches(gid) && (job.id == null || job.id == gid) && o.getString("client_request_id") == job.request)
-        val status = o.getString("status"); require(status in listOf("queued", "running", "uncertain", "succeeded", "failed", "cancelled"))
-        require(o.getString("stage").length <= 128)
+        val gid = string(o, "id"); require(id.matches(gid) && (job.id == null || job.id == gid) && string(o, "client_request_id") == job.request)
+        val status = string(o, "status"); require(status in listOf("queued", "running", "uncertain", "succeeded", "failed", "cancelled"))
+        require(string(o, "stage").length <= 128)
         val deadline = integer(o, "deadline"); val delay = integer(o, "poll_after_ms"); require(deadline > 0)
         val action = nullable(o, "required_action"); require(action == null || action == "operator_reconciliation_required"); nullable(o, "error_code")
-        val availability = o.getString("availability"); require(availability in listOf("pending", "available", "expired"))
+        val availability = string(o, "availability"); require(availability in listOf("pending", "available", "expired"))
         val images = mutableListOf<ChatImage>()
         if (status == "succeeded" && availability == "available") {
-            val manifest = o.getJSONObject("manifest"); require(manifest.get("version") == 1 && manifest.getString("kind") == "image")
+            val manifest = o.getJSONObject("manifest"); require(manifest.get("version") == 1 && string(manifest, "kind") == "image")
             val outputs = manifest.getJSONArray("outputs"); require(outputs.length() in 1..16)
             for (i in 0 until outputs.length()) {
-                val out = outputs.getJSONObject(i); require(out.getString("id").length <= 256)
-                val attachment = out.getJSONObject("attachment"); val aid = attachment.getString("attachment_id")
-                require(attachment.getString("source") == "being-service" && Regex("att_[A-Za-z0-9_-]{1,124}").matches(aid))
-                require(Regex("image/(png|jpeg|webp|gif|avif)").matches(out.getString("mime")))
-                val raw = out.getString("view_url"); val url = raw.toHttpUrlOrNull() ?: error("无效图片地址")
+                val out = outputs.getJSONObject(i); require(string(out, "id").length <= 256)
+                val attachment = out.getJSONObject("attachment"); val aid = string(attachment, "attachment_id")
+                require(string(attachment, "source") == "being-service" && Regex("att_[A-Za-z0-9_-]{1,124}").matches(aid))
+                require(Regex("image/(png|jpeg|webp|gif|avif)").matches(string(out, "mime")))
+                val raw = string(out, "view_url"); val url = raw.toHttpUrlOrNull() ?: error("无效图片地址")
                 require(ImageTransport.validURL(raw) && url.host == "beings.town" && url.port == 443 && url.fragment == null && url.encodedPath == "/api/being-service/v1/assets/$aid/view" && !url.queryParameter("token").isNullOrEmpty())
                 images.add(ChatImage(raw, job.title))
             }

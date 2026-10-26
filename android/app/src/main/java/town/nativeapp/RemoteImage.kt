@@ -85,7 +85,7 @@ internal object ImageTransport {
 internal class ImageQueryException(val status: Int) : IOException("查询失败（HTTP $status）")
 data class ChatImage(val url: String, val label: String)
 
-@Composable fun RemoteImage(image: ChatImage, onOpen: (() -> Unit)? = null, fullScreen: Boolean = false) {
+@Composable fun RemoteImage(image: ChatImage, onOpen: (() -> Unit)? = null, fullScreen: Boolean = false, inlineMaxHeight: androidx.compose.ui.unit.Dp = 260.dp) {
     var bitmap by remember(image.url) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
     var failed by remember(image.url) { mutableStateOf(false) }
     var retry by remember(image.url) { mutableIntStateOf(0) }
@@ -107,11 +107,11 @@ data class ChatImage(val url: String, val label: String)
     var scale by remember(image.url) { mutableFloatStateOf(1f) }
     var offset by remember(image.url) { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
     val transform = rememberTransformableState { zoom, pan, _ -> scale = (scale * zoom).coerceIn(1f, 5f); offset = if (scale == 1f) androidx.compose.ui.geometry.Offset.Zero else offset + pan }
-    Box((if (fullScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 260.dp)), contentAlignment = Alignment.Center) {
+    Box((if (fullScreen) Modifier.fillMaxSize() else Modifier.fillMaxWidth().heightIn(min = 140.dp, max = inlineMaxHeight)), contentAlignment = Alignment.Center) {
         bitmap?.let { value ->
             Image(value, image.label.ifBlank { "查看图片" },
                 (if (fullScreen) Modifier.fillMaxSize().graphicsLayer(scaleX = scale, scaleY = scale, translationX = offset.x, translationY = offset.y).transformable(transform)
-                 else Modifier.fillMaxWidth().heightIn(max = 260.dp).clickable { if (onOpen != null) onOpen() else preview = true }), contentScale = ContentScale.Fit)
+                 else Modifier.fillMaxWidth().heightIn(max = inlineMaxHeight).clickable { if (onOpen != null) onOpen() else preview = true }), contentScale = ContentScale.Fit)
         } ?: if (failed) TextButton(onClick = { retry++ }) { Text("图片加载失败，点击重试") } else CircularProgressIndicator()
     }
     if (preview) ImageGallery(listOf(image), 0) { preview = false }

@@ -13,6 +13,142 @@ final class CompatibilityUITests: XCTestCase {
         app.launch()
     }
 
+    func testPortalConnectedConfigurationAndStop() throws {
+        _ = try connectToFixture()
+        app.tabBars.buttons["更多"].tap()
+        let entry = app.buttons.containing(.staticText, identifier: "本机 Portal").firstMatch
+        for _ in 0..<3 where !entry.isHittable { app.swipeUp() }
+        XCTAssertTrue(entry.waitForExistence(timeout: 5)); entry.tap()
+        let start = app.buttons["portalStartStop"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5)); XCTAssertTrue(start.isEnabled)
+        start.tap()
+        XCTAssertTrue(app.buttons["停止 Portal"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.textFields["portalName"].isEnabled)
+        app.buttons["停止 Portal"].tap()
+        XCTAssertEqual(app.staticTexts["portalStatus"].label, "尚未启动")
+        let expand = app.buttons["portalPermissions"]
+        for _ in 0..<3 where !expand.isHittable { app.swipeUp() }
+        expand.tap()
+        XCTAssertTrue(app.switches["允许读取"].firstMatch.waitForExistence(timeout: 5))
+        capture("ios-portal-permissions")
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["beingConnection"].waitForExistence(timeout: 5))
+    }
+
+    func testPortalDeniedCalendarAndHealthControls() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("Permission UI fixtures only run on an isolated simulator")
+        #endif
+        app.resetAuthorizationStatus(for: .calendar)
+        app.resetAuthorizationStatus(for: .health)
+        app.launch()
+        _ = try connectToFixture()
+        app.tabBars.buttons["更多"].tap()
+        let entry = app.buttons.containing(.staticText, identifier: "本机 Portal").firstMatch
+        for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+        entry.tap()
+        let expand = app.buttons["portalPermissions"]
+        for _ in 0..<4 where !expand.isHittable { app.swipeUp() }
+        expand.tap()
+        let toggle = app.switches["允许读取"].firstMatch
+        for _ in 0..<3 where !toggle.isHittable { app.swipeUp() }
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 8))
+        let deny = alert.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS %@", "Don't Allow", "不允许")).firstMatch
+        XCTAssertTrue(deny.exists)
+        deny.tap()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertTrue(app.buttons["前往系统设置授权"].firstMatch.exists)
+        toggle.tap()
+        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertFalse(springboard.alerts.firstMatch.exists)
+        capture("ios-portal-denied-permission")
+        for _ in 0..<6 where !expand.isHittable { app.swipeDown() }
+        expand.tap()
+        let health = app.buttons["portalHealthConnect"]
+        for _ in 0..<5 where !health.isHittable { app.swipeUp() }
+        XCTAssertTrue(health.isEnabled)
+        XCTAssertEqual(app.staticTexts["portalHealthStatus"].label, "尚未关联")
+        capture("ios-portal-health-connect")
+        health.tap()
+        let proceed = app.buttons["portalHealthContinue"]
+        XCTAssertTrue(proceed.waitForExistence(timeout: 5))
+        capture("ios-portal-health-introduction")
+        app.buttons["portalHealthCancel"].tap()
+        XCTAssertEqual(app.staticTexts["portalHealthStatus"].label, "尚未关联")
+        health.tap()
+        XCTAssertTrue(proceed.waitForExistence(timeout: 5))
+        proceed.tap()
+        let denyHealth = app.buttons["UIA.Health.DoNotAllow.Button"]
+        XCTAssertTrue(denyHealth.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["UIA.Health.步数.SwitchCell.Switch"].exists)
+        capture("ios-portal-health-system-sheet")
+        denyHealth.tap()
+        let acknowledgement = app.buttons["好"]
+        if acknowledgement.waitForExistence(timeout: 2) { acknowledgement.tap() }
+        // Both completion and cancellation must leave a visible outcome in the sheet.
+        let done = app.buttons["portalHealthDone"]
+        let failed = app.staticTexts["Apple 健康关联未完成，请重试。"]
+        let outcome = NSPredicate { _, _ in done.exists || failed.exists }
+        wait(for: [expectation(for: outcome, evaluatedWith: app)], timeout: 8)
+        capture("ios-portal-health-denied-result")
+        if done.exists { done.tap() } else { app.buttons["portalHealthCancel"].tap() }
+        XCTAssertTrue(app.staticTexts["portalHealthStatus"].waitForExistence(timeout: 5))
+        // HealthKit does not reveal read denial. A connection must never claim
+        // that the system has granted access to the requested categories.
+        if app.buttons["portalHealthDisconnect"].exists {
+            XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "iOS 不向 App 透露每类数据是否允许读取")).firstMatch.exists)
+            app.buttons["portalHealthDisconnect"].tap()
+        }
+        XCTAssertEqual(app.staticTexts["portalHealthStatus"].label, "尚未关联")
+        app.navigationBars.buttons.firstMatch.tap()
+    }
+
+    func testPortalHealthSuccessfulConnection() throws {
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("HealthKit UI fixtures only run on an isolated simulator")
+        #endif
+        app.resetAuthorizationStatus(for: .health)
+        app.launch()
+        _ = try connectToFixture()
+        app.tabBars.buttons["更多"].tap()
+        let entry = app.buttons.containing(.staticText, identifier: "本机 Portal").firstMatch
+        for _ in 0..<4 where !entry.isHittable { app.swipeUp() }
+        entry.tap()
+        let health = app.buttons["portalHealthConnect"]
+        for _ in 0..<5 where !health.isHittable { app.swipeUp() }
+        health.tap()
+        let proceed = app.buttons["portalHealthContinue"]
+        XCTAssertTrue(proceed.waitForExistence(timeout: 5)); proceed.tap()
+        let all = app.cells["UIA.Health.AuthSheet.AllCategoryButton"]
+        XCTAssertTrue(all.waitForExistence(timeout: 10)); all.tap()
+        let allow = app.buttons["UIA.Health.Allow.Button"]
+        XCTAssertTrue(allow.isEnabled); allow.tap()
+        let done = app.buttons["portalHealthDone"]
+        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["关联请求已完成"].exists)
+        capture("ios-portal-health-completion")
+        done.tap()
+        XCTAssertEqual(app.staticTexts["portalHealthStatus"].label, "已关联当前 Being")
+        // Repeating the same request may return immediately without a native sheet.
+        app.buttons["管理健康关联与共享范围"].tap()
+        XCTAssertTrue(proceed.waitForExistence(timeout: 5)); proceed.tap()
+        XCTAssertTrue(done.waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["没有出现系统选择页？"].exists)
+        capture("ios-portal-health-repeat-completion")
+        done.tap()
+        capture("ios-portal-health-connected")
+        let disconnect = app.buttons["portalHealthDisconnect"]
+        for _ in 0..<3 where !disconnect.isHittable { app.swipeUp() }
+        disconnect.tap()
+        XCTAssertEqual(app.staticTexts["portalHealthStatus"].label, "尚未关联")
+        app.navigationBars.buttons.firstMatch.tap()
+    }
+
     func testWelcomeAndConnectionSheet() {
         XCTAssertTrue(app.buttons["连接我的 Being"].waitForExistence(timeout: 15))
         app.buttons["连接我的 Being"].tap()
@@ -332,20 +468,26 @@ final class CompatibilityUITests: XCTestCase {
         let input = app.descendants(matching: .any).matching(identifier: "消息").firstMatch
         input.tap(); input.typeText("Incremental reply prompt")
         app.buttons["发送"].tap()
-        let preview = app.staticTexts["liveProcessPreview"]
-        XCTAssertTrue(preview.waitForExistence(timeout: 10))
-        XCTAssertTrue(preview.label.contains("正在检查上下文"))
+        XCTAssertFalse(app.otherElements["messageSending"].exists)
+        XCTAssertFalse(app.activityIndicators["messageSending"].exists)
+        let activeDetails = app.buttons["activeRunDetails"]
+        XCTAssertTrue(activeDetails.waitForExistence(timeout: 10))
+        XCTAssertEqual(activeDetails.value as? String, "已折叠")
+        XCTAssertFalse(app.staticTexts["liveProcessPreview"].exists)
+        XCTAssertFalse(app.staticTexts["runProcessDetails"].exists)
         XCTAssertFalse(app.staticTexts["第一段"].exists)
         // History acknowledges the prompt before the run or reply is complete.
         app.buttons["刷新"].tap()
         server.emitProgress("reasoning", ["delta": "，继续核对信息"])
-        wait(for: [expectation(for: NSPredicate(format: "label CONTAINS %@", "继续核对信息"), evaluatedWith: preview)], timeout: 5)
+        XCTAssertFalse(app.staticTexts["runProcessDetails"].exists)
         server.emitProgress("tool_use", ["name": "search", "input": ["query": "fixture"]])
         XCTAssertTrue(app.buttons["activeRunDetails"].waitForExistence(timeout: 5))
         wait(for: [expectation(for: NSPredicate(format: "label CONTAINS %@", "search"), evaluatedWith: app.buttons["activeRunDetails"])], timeout: 5)
         app.buttons["activeRunDetails"].tap()
         XCTAssertTrue(app.staticTexts["runProcessDetails"].label.contains("继续核对信息"))
         app.buttons["activeRunDetails"].tap()
+        XCTAssertFalse(app.staticTexts["runProcessDetails"].exists)
+        XCTAssertFalse(app.staticTexts["liveProcessPreview"].exists)
         server.emitProgress("tool_result", ["content": "已找到结果"])
         server.appendReply("第一段")
         let first = app.staticTexts["第一段"]
@@ -373,6 +515,56 @@ final class CompatibilityUITests: XCTestCase {
         details.tap()
         XCTAssertTrue(app.staticTexts["runProcessDetails"].label.contains("已找到结果"))
         capture("incremental-completed-process")
+    }
+
+    func testHistoryAheadOfLiveReplyNeverAddsASecondBubble() throws {
+        let server = try connectToFixture()
+        server.enableChat(staged: true)
+        XCTAssertTrue(app.staticTexts["Compatibility message 060"].waitForExistence(timeout: 10))
+        let input = app.descendants(matching: .any).matching(identifier: "消息").firstMatch
+        input.tap(); input.typeText("History ahead prompt"); app.buttons["发送"].tap()
+        XCTAssertTrue(app.buttons["停止生成"].waitForExistence(timeout: 10))
+        server.appendReply("第一段")
+        XCTAssertTrue(app.staticTexts["第一段"].waitForExistence(timeout: 5))
+        server.publishHistoryAhead("第一段，第二段，最终内容。")
+        app.buttons["刷新"].tap()
+        // Wait for the history read to finish before inspecting the race.
+        wait(for: [expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["刷新"])], timeout: 10)
+        XCTAssertFalse(app.staticTexts["第一段，第二段，最终内容。"].exists)
+        XCTAssertEqual(app.staticTexts.matching(identifier: "第一段").count, 1)
+        server.appendReply("，第二段")
+        XCTAssertTrue(app.staticTexts["第一段，第二段"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["第一段，第二段，最终内容。"].exists)
+        server.appendReply("，最终内容。")
+        XCTAssertTrue(app.staticTexts["第一段，第二段，最终内容。"].waitForExistence(timeout: 5))
+        server.finishReply()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["停止生成"])], timeout: 10)
+        app.buttons["刷新"].tap()
+        XCTAssertEqual(app.staticTexts.matching(identifier: "第一段，第二段，最终内容。").count, 1)
+        capture("single-live-reply-after-history-race")
+    }
+
+    func testQueuedReplyPublishesReplayFragmentsBeforeCompletion() throws {
+        let server = try connectToFixture()
+        server.enableReplayChat()
+        XCTAssertTrue(app.staticTexts["Compatibility message 060"].waitForExistence(timeout: 10))
+        let input = app.descendants(matching: .any).matching(identifier: "消息").firstMatch
+        input.tap(); input.typeText("Replay incremental prompt")
+        app.buttons["发送"].tap()
+        XCTAssertTrue(app.buttons["停止生成"].waitForExistence(timeout: 10))
+        var reply = ""
+        for part in ["收到", "一个", "片段", "就显示", "，不等", "全部完成。"] {
+            server.appendReply(part)
+            reply += part
+            XCTAssertTrue(app.staticTexts[reply].waitForExistence(timeout: 4))
+            XCTAssertTrue(app.buttons["停止生成"].exists)
+            XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "messageSending").firstMatch.exists)
+        }
+        server.finishReply()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["停止生成"])], timeout: 10)
+        XCTAssertEqual(app.staticTexts.matching(identifier: reply).count, 1)
+        XCTAssertEqual(server.sentMessages, ["Replay incremental prompt"])
+        capture("replay-incremental-reply")
     }
 
     func testMarkdownImageStreamingRetryPreviewAndHistory() throws {

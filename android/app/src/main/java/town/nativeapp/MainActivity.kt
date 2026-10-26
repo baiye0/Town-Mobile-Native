@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
@@ -170,10 +171,11 @@ class MainActivity : ComponentActivity() {
                 if(message.kind=="marker"){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){HorizontalDivider(Modifier.weight(1f));Text(message.text,Modifier.padding(horizontal=8.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant);HorizontalDivider(Modifier.weight(1f))}}
                 else {
                 val user = message.role == "user"
-                Row(Modifier.fillMaxWidth().padding(start=if(user)40.dp else 0.dp,end=if(user)0.dp else 24.dp), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start) {
+                Row(Modifier.fillMaxWidth().padding(start=if(user)16.dp else 0.dp,end=if(user)0.dp else 24.dp), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
                     val hasAttachment = user && (message.files?.isNotEmpty() == true || message.text.contains("[attachment-message:v1:"))
                     val originalText = MessagePresentation.body(message)
-                    MessageActions(originalText,onQuote={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+it}) {
+                    if(user)DeliveryStatusView(message,m)
+                    MessageActions(originalText,onQuote={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+it},modifier=Modifier.weight(1f,fill=false)) {
                     Column(Modifier.widthIn(max=if(user)310.dp else 580.dp),horizontalAlignment=if(user)Alignment.End else Alignment.Start) {
                     if (hasAttachment) {
                         Column(Modifier.wrapContentWidth().widthIn(max = 310.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -181,7 +183,6 @@ class MainActivity : ComponentActivity() {
                                 val isGlobalBeingMessage = message.sceneID == null && message.role == "being" && message.kind == null
                                 if((m.showAllScenes&&message.sceneID!=m.selected)||isGlobalBeingMessage)Text(if(isGlobalBeingMessage) "全局消息" else (message.sceneLabel ?: message.sceneID ?: m.sceneName(message)),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                 AttachmentMessageView(message,m,MaterialTheme.colorScheme.onSurface)
-                                DeliveryStatusView(message,m,MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             if (originalText.isNotBlank()) {
                                 Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.chatBubble(true), RoundedCornerShape(22.dp)).padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -196,7 +197,6 @@ class MainActivity : ComponentActivity() {
                             // AttachmentMessageView intentionally omits user text: render the prompt here,
                             // just as the attachment branch does, before its secondary actions/status.
                             if(user) UserMessageBody(message) else AttachmentMessageView(message,m,MaterialTheme.colorScheme.onSurface)
-                            if(user) DeliveryStatusView(message,m,Color.White)
                         }
                     }
                     }
@@ -307,19 +307,14 @@ fun chatTime(value:String):String = runCatching {
     date.format(format)
 }.getOrDefault(value.replace("T"," ").take(16))
 
-@Composable private fun DeliveryStatusView(message: Message, m: TownModel, color: Color) {
-    val entry = m.outbox.firstOrNull { "local:${it.id}:user" == message.kind } ?: return
-    val label = DeliveryRules.bubbleStatus(entry) ?: return
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(label, fontSize = 12.sp, color = color.copy(alpha = .82f))
-        entry.error?.takeIf { it.isNotBlank() }?.let { Text(it, fontSize = 11.sp, color = color.copy(alpha = .76f), maxLines = 3) }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (entry.phase == "failed") TextButton(onClick = { m.retryQueued(entry.id) }, contentPadding = PaddingValues(0.dp)) { Text("重试", color = color) }
-            if (entry.phase == "unknown") TextButton(onClick = { m.resumeDelivery() }, contentPadding = PaddingValues(0.dp)) { Text("核对历史", color = color) }
+@Composable private fun DeliveryStatusView(message: Message, m: TownModel) {
+    val entry = m.outbox.firstOrNull { it.userID == message.id && it.endpoint == m.connection?.endpoint } ?: return
+    if(DeliveryRules.showsRetry(entry.phase)) {
+        IconButton(onClick={m.retryQueued(entry.id)},enabled=entry.phase!="unknown"||!m.busy,modifier=Modifier.size(44.dp)) {
+            Icon(Icons.Filled.Error,"重试发送",tint=Color(0xffd93025),modifier=Modifier.size(22.dp))
         }
     }
 }
-
 
 @Composable fun SBSControl(m:TownModel) {
     LaunchedEffect(m.connection) { if(m.connection!=null)m.syncSBS() }

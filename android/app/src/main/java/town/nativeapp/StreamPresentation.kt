@@ -5,17 +5,27 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Called on the main dispatcher. Keep every token, publish at most every 50 ms. */
+/** First packet is immediate; subsequent snapshots share a display frame. No synthetic typing. */
 class StreamPresentation(private val scope:CoroutineScope,private val publish:(PendingSend)->Unit) {
     private var pending:PendingSend?=null
     private var task:Job?=null
     fun submit(entry:PendingSend) {
-        pending=entry.copy(files=entry.files.toMutableList())
-        if(task==null)task=scope.launch { delay(50);flush() }
+        val snapshot=entry.copy(files=entry.files.toMutableList())
+        if(task==null) {
+            publish(snapshot)
+            task=scope.launch {
+                while(true) {
+                    delay(16)
+                    val next=pending ?: break
+                    pending=null;publish(next)
+                }
+                task=null
+            }
+        } else pending=snapshot
     }
     fun flush() {
         task?.cancel();task=null
-        val entry=pending ?: return
-        pending=null;publish(entry)
+        val next=pending ?: return
+        pending=null;publish(next)
     }
 }

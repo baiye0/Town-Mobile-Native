@@ -1,8 +1,18 @@
 # Being Town 0.1.0 TestFlight
 
-日期：2026-10-21（Asia/Shanghai）。
+日期：2026-10-23（Asia/Shanghai）。
 
-## 当前构建：0.1.0 (6)
+## 当前构建：0.1.0 (7)
+
+- **2026-10-23 18:24:57** 最终包上传成功，Xcode 返回 `Uploaded package is processing`、`Upload succeeded` 与 `EXPORT SUCCEEDED`。网页已确认构建 7 **正在测试**，关联现有内部与外部两个 `d5` 群组，简体中文测试说明已保存，保留自动通知。外测链接：https://testflight.apple.com/join/tbMC57cD 。
+- 包含聊天发送/流式去重/性能、侧栏与思考折叠、移动生图布局、iOS Portal 与系统权限/HealthKit。发布前全量改动 Review 及修复详见 [发布 Review](RELEASE-REVIEW-2026-10-23.md)。
+- Swift Core 82 项、Android 81 项及 Lint、iOS 39 项状态/原生测试、13 项界面测试全部通过。Android 最新 APK：`android/app/build/outputs/apk/debug/app-debug.apk`。
+- 最终 Release 归档：`artifacts/testflight/Being-0.1.0-7-20261023-final.xcarchive`；App Store IPA：`artifacts/testflight/ipa-0.1.0-7-20261023-final/Town.ipa`。签名、源码一致性与 dSYM 校验通过，最低 iOS 16.0，可执行文件 UUID 为 `EBC7C366-86BF-3DC7-92D4-6E91623214D5`。
+- 同一归档开发签名 IPA：`artifacts/testflight/device-0.1.0-7-20261023-final/Town.ipa`；18:24 覆盖安装，18:25 成功启动到 iPhone 16 Pro Max。未清除账号和历史；真机未运行模拟器 fixture 或读取用户健康数据。
+- 首次上传因缺少 `NSHealthUpdateUsageDescription` 被 Apple 校验 90683 拒绝；已补齐只读、不请求写入的准确说明。最终产物带 `-final` 后缀，之前本地产物不用于分发。
+- 上传日志、源码清单、校验结果：`artifacts/testflight/upload-0.1.0-7-20261023-final.log`、`source-sha256-0.1.0-7-20261023-final.json`、`verification-0.1.0-7-20261023-final.json`。
+
+## 此前构建：0.1.0 (6)
 
 提交前 Review 随后修复了智能 UI 开关的场景恢复及大写围栏历史识别；这两处源码修复尚未重新出包，不包含在下述构建 6 中。回归结果见 `TESTING.md` 顶部。
 

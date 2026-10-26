@@ -45,6 +45,7 @@ enum ImageGeneration {
         return GenerationReceipt(being: being, jobs: jobs)
     }
     static func parts(_ text: String) -> [GenerationPart] {
+        guard text.contains("being.image-generation") else { return [GenerationPart(text: text)] }
         let source = text as NSString; var cursor = 0, plain = 0; var result: [GenerationPart] = []
         func nextLine(_ start: Int) -> Int { let r = source.range(of: "\n", range: NSRange(location: start, length: source.length - start)); return r.location == NSNotFound ? source.length : r.location + 1 }
         func emit(_ start: Int, _ end: Int, _ value: String) {

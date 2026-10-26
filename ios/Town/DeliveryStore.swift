@@ -33,7 +33,7 @@ extension Store {
         outbox.append(entry)
         do {
             try saveOutbox()
-            // The worker may be busy or blocked by an uncertain send. Project
+            // The worker may be busy with an earlier message. Project
             // the durable queue entry before clearing the composer either way.
             project(entry); persist(); submittedMessageID = entry.userID
             draft = ""; attachments = []; intelligentUI = false; intelligentUISelection = nil
@@ -68,10 +68,58 @@ extension Store {
         } catch { outbox = old; notice = "无法保存队列修改。" }
     }
     func retryQueued(_ id: String) {
+        if outbox.contains(where: { $0.id == id && $0.phase == "unknown" }) { retryUnconfirmed(id); return }
         guard let i = outbox.firstIndex(where: { $0.id == id }), DeliveryRules.canRetry(outbox[i].phase) else { return }
         outbox[i].phase = "queued"; outbox[i].error = nil
         for j in outbox[i].files.indices where outbox[i].files[j].attachmentID != nil && outbox[i].files[j].jobID == nil { outbox[i].files[j].forceParse = true }
         do { try saveOutbox(); startDelivery() } catch { outbox[i].phase = "failed"; notice = "无法保存发送状态。" }
+    }
+    /// An explicit tap may retry an unconfirmed send, after checking that it was not accepted.
+    private func retryUnconfirmed(_ id: String) {
+        guard worker == nil, !busy, let c = connection,
+              let initial = outbox.first(where: { $0.id == id && $0.endpoint == c.endpoint && $0.phase == "unknown" }) else { return }
+        busy = true; activeScene = initial.sceneID; activeSendID = id; activity = "正在核对发送结果"
+        worker = Task {
+            var resumeConfirmed = false
+            defer { busy = false; activeScene = nil; activeSendID = nil; worker = nil; activity = ""; persist(); startDelivery(recover: resumeConfirmed) }
+            var entry = initial
+            do {
+                let (bytes, response) = try await session.data(for: request(c, "/api/stream/active"))
+                let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let active: Bool
+                if code == 204 { active = false }
+                else {
+                    guard code == 200, let data = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                          data["stream_id"] is String, data["finished"] is Bool else { throw PortalError.invalidResponse }
+                    active = data["finished"] as? Bool != true
+                }
+                var accepted = false
+                let completed = try await reconcile(&entry, connection: c) { accepted = $0 }
+                try Task.checkCancellation()
+                guard connection == c, let index = outbox.firstIndex(where: { $0.id == id && $0.phase == "unknown" }) else { return }
+                let previous = outbox
+                if DeliveryRules.shouldRecoverConfirmedSend(active: active, accepted: accepted, hasReply: !entry.reply.isEmpty) {
+                    // Acceptance (or a partial reply) is not completion. Keep the
+                    // durable recovery cursor and resume GETs without another POST.
+                    entry.phase = "waiting"; entry.error = nil
+                    outbox[index] = entry
+                    resumeConfirmed = true
+                } else if completed || accepted {
+                    guard persist() else { throw PortalError.server("无法保存已确认的消息") }
+                    outbox.remove(at: index)
+                } else if !active && entry.reply.isEmpty {
+                    entry.phase = "queued"; entry.error = nil; entry.streamID = nil; entry.cursor = 0
+                    outbox[index] = entry
+                } else {
+                    outbox[index].error = "服务仍在处理消息，请稍后重试。"
+                }
+                do { try saveOutbox() } catch { outbox = previous; throw error }
+            } catch {
+                if !Task.isCancelled, let i = outbox.firstIndex(where: { $0.id == id }) {
+                    outbox[i].error = "暂时无法核对发送结果，请重试。"; try? saveOutbox()
+                }
+            }
+        }
     }
     func resumeDelivery() {
         guard worker == nil else { return }
@@ -80,13 +128,12 @@ extension Store {
     }
     func startDelivery(recover: Bool = false) {
         guard !outboxUnavailable, !messageDeletionsUnavailable, worker == nil, !busy, let c = connection else { return }
-        // A failed or explicitly stopped item is no longer a runnable queue
-        // head. It must not prevent a later queued message from being sent.
-        // An unknown/sending item still blocks the endpoint until it is
-        // reconciled or removed, preventing an accidental duplicate turn.
+        // Failed, stopped and unresolved sends are not automatic retry candidates.
+        // Leave them actionable on their own bubbles without blocking newer messages.
         let endpointItems = outbox.enumerated().filter { $0.element.endpoint == c.endpoint }
+        let recoverUnknown = recover && !endpointItems.contains { ["queued", "preparing"].contains($0.element.phase) }
         var head = 0
-        while head < endpointItems.count && ["failed", "stopped"].contains(endpointItems[head].element.phase) { head += 1 }
+        while head < endpointItems.count && DeliveryRules.skipsQueueHead(endpointItems[head].element.phase, recovering: recoverUnknown) { head += 1 }
         guard head < endpointItems.count else { return }
         let first = endpointItems[head].element
         guard !isMessageDeleted(Message(id: first.userID, role: "user", text: first.preparedText ?? first.text, sceneID: first.sceneID), endpoint: c.endpoint) else { return }
@@ -94,9 +141,7 @@ extension Store {
         busy = true; activeScene = first.sceneID; activeSendID = first.id
         worker = Task {
             var safeToContinue = false
-            // Always attempt a drain after the worker exits. startDelivery()
-            // skips failed/stopped heads and still refuses to pass an unknown
-            // result, so a retryable failure cannot strand later messages.
+            // Continue draining newer messages without automatically retrying failures.
             defer { busy = false; activeScene = nil; activeSendID = nil; streamID = nil; streamingReplyID = nil; activity = ""; worker = nil; persist(); startDelivery() }
             guard let index = outbox.firstIndex(where: { $0.id == first.id }) else { return }
             var entry = outbox[index]
@@ -250,7 +295,7 @@ extension Store {
                 changed = true
             }
         }
-        if changed { room.updated = Date(); conversations[i] = room }
+        if changed { room.updated = Date(); projectConversation(room, at: i) }
         if busy, activeScene == entry.sceneID, ["sending", "waiting"].contains(entry.phase),
            let latest = rows.last, latest.role == "being", !latest.text.isEmpty,
            streamingReplyID != latest.id { streamingReplyID = latest.id }
@@ -286,10 +331,11 @@ extension Store {
     func recover(_ entry: inout PendingSend, connection c: Connection) async throws -> Bool {
         activity = "正在恢复回复"
         var idleSince = Date()
-        var attempts = 0
+        var interval = 0.5
         var failures = 0
         while Date().timeIntervalSince(idleSince) < 300 {
             try Task.checkCancellation()
+            var receivedEvents = false
             do {
                 let (bytes, response) = try await session.data(for: request(c, "/api/stream/active?after=\(entry.cursor)"))
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -309,6 +355,7 @@ extension Store {
                         let value = event["data"] as? [String: Any] ?? [:]
                         if ReplyStream.isProgress(type, value, scene: entry.sceneID) { idleSince = Date() }
                         try consume(type, value, entry: &entry); entry.cursor = seq
+                        receivedEvents = true
                     }
                     project(entry)
                     if let i = outbox.firstIndex(where: { $0.id == entry.id }) { outbox[i] = entry; try saveOutbox() }
@@ -317,8 +364,8 @@ extension Store {
                 failures = 0
             } catch is CancellationError { throw CancellationError() }
             catch { failures += 1; if failures >= 5 { throw error } }
-            attempts += 1
-            try await Task.sleep(for: .seconds(min(5, 1 + attempts / 3)))
+            interval = receivedEvents ? 0.5 : min(5, interval * 1.5)
+            try await Task.sleep(for: .seconds(interval))
         }
         return false
     }
@@ -330,7 +377,7 @@ extension Store {
             if next <= cursor { return cursor }; cursor = next
         }
     }
-    func reconcile(_ entry: inout PendingSend, connection c: Connection) async throws -> Bool {
+    func reconcile(_ entry: inout PendingSend, connection c: Connection, submissionFound: ((Bool) -> Void)? = nil) async throws -> Bool {
         var cursor = entry.baseline
         var sawUser = false
         var reply = ""
@@ -350,6 +397,7 @@ extension Store {
             }
             cursor = rows.compactMap { $0["seq"] as? Int }.max() ?? cursor
         }
+        submissionFound?(sawUser)
         guard sawUser, !reply.isEmpty else { return false }
         entry.reply = reply
         if let i = conversations.firstIndex(where: { $0.id == entry.sceneID && $0.endpoint == entry.endpoint }) {

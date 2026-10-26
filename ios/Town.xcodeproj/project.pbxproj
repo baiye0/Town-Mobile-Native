@@ -155,9 +155,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Town.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "按你在系统中选择的范围，向当前 Being 提供活动、睡眠、锻炼、心肺与身体指标，用于健康和活动回顾。只读取，不修改。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "本版本仅在你选择共享后读取健康数据，不会请求写入权限，也不会写入或修改健康数据。";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 7N8XHQWCNN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Being;
@@ -168,6 +171,12 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄照片并添加到对话附件。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于将你选择的图片保存到相册。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于选择照片并添加到对话附件。";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "允许当前 Being 在你授权后读取日历，并在你确认后修改日程。";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "允许 Portal 读取授权的日程；写入需当前 Being 授权并由你逐次确认。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "允许当前 Being 在你授权后读取提醒事项，并在你确认后修改。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许 Portal 读取提醒事项；写入需当前 Being 授权并由你逐次确认。";
+				INFOPLIST_KEY_NSContactsUsageDescription = "允许 Portal 读取你授权的联系人，修改联系人需你逐次确认。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "仅在应用使用期间，将你授权的当前位置提供给当前 Being。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -185,9 +194,12 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Town.entitlements;
 				"CODE_SIGN_ENTITLEMENTS[sdk=iphonesimulator*]" = Simulator.entitlements;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "按你在系统中选择的范围，向当前 Being 提供活动、睡眠、锻炼、心肺与身体指标，用于健康和活动回顾。只读取，不修改。";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "本版本仅在你选择共享后读取健康数据，不会请求写入权限，也不会写入或修改健康数据。";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 7N8XHQWCNN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Being;
@@ -198,6 +210,12 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄照片并添加到对话附件。";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "用于将你选择的图片保存到相册。";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于选择照片并添加到对话附件。";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "允许当前 Being 在你授权后读取日历，并在你确认后修改日程。";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "允许 Portal 读取授权的日程；写入需当前 Being 授权并由你逐次确认。";
+				INFOPLIST_KEY_NSRemindersUsageDescription = "允许当前 Being 在你授权后读取提醒事项，并在你确认后修改。";
+				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "允许 Portal 读取提醒事项；写入需当前 Being 授权并由你逐次确认。";
+				INFOPLIST_KEY_NSContactsUsageDescription = "允许 Portal 读取你授权的联系人，修改联系人需你逐次确认。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "仅在应用使用期间，将你授权的当前位置提供给当前 Being。";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "使用系统语音识别将语音转换为草稿，由你确认后发送。";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

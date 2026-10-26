@@ -81,27 +81,39 @@ import XCTest
         withExtendedLifetime((storeObservation, draftObservation)) {}
     }
 
-    func testStreamPresentationCoalescesAndFlushesFinalReply() async throws {
-        var snapshots: [PendingSend] = []
-        let presentation = StreamPresentation { snapshots.append($0) }
+    func testBurstPresentationKeepsFirstAndLatestWithoutLatePublish() async throws {
+        var snapshots: [String] = []
+        let frames = StreamPresentation { snapshots.append($0.reply) }
         var entry = PendingSend(endpoint: "https://example.invalid", sceneID: "s", title: "s", text: "prompt")
-        for index in 1...1000 {
-            entry.reply += "字"
-            entry.cursor = index
-            presentation.submit(entry)
-        }
-        XCTAssertTrue(snapshots.isEmpty)
-        presentation.flush()
+        entry.reply = "first"; frames.submit(entry)
+        XCTAssertEqual(snapshots, ["first"])
+        for _ in 0..<2000 { entry.reply += "x"; frames.submit(entry) }
         XCTAssertEqual(snapshots.count, 1)
-        XCTAssertEqual(snapshots[0].cursor, 1000)
-        XCTAssertEqual(snapshots[0].reply.count, 1000)
-        presentation.flush()
-        XCTAssertEqual(snapshots.count, 1)
-        entry.reply += "末尾"
-        presentation.submit(entry)
-        try await Task.sleep(for: .milliseconds(150))
+        frames.flush()
+        XCTAssertEqual(snapshots.last, entry.reply); XCTAssertEqual(snapshots.count, 2)
+        try await Task.sleep(for: .milliseconds(40))
         XCTAssertEqual(snapshots.count, 2)
-        XCTAssertEqual(snapshots.last?.reply, entry.reply)
+    }
+
+    func testLongHistoryStreamingProjectionPerformance() throws {
+        let store = Store()
+        let connection = try Connection("https://example.invalid/performance?token=test")
+        store.connection = connection; store.selected = "s"; store.showAllScenes = true
+        let history = (1...1000).map { Message(role: "being", text: "Historical message \($0)", sceneID: "s", sequence: $0) }
+        store.timeline = history
+        store.conversations = [Conversation(id: "s", endpoint: connection.endpoint, messages: history)]
+        var entry = PendingSend(endpoint: connection.endpoint, sceneID: "s", title: "s", text: "prompt", baseline: 1000)
+        entry.phase = "sending"
+        ReplyStream.consume("text", ["text": "first"], entry: &entry); store.project(entry)
+        XCTAssertEqual(store.displayMessages.count, 1002)
+        let clock = ContinuousClock(); let start = clock.now
+        for _ in 0..<100 {
+            ReplyStream.consume("text", ["text": " next"], entry: &entry); store.project(entry)
+            XCTAssertEqual(store.displayMessages.last?.text, entry.reply)
+        }
+        print("STREAM_PERFORMANCE: 100 content updates with 1000 history rows: \(start.duration(to: clock.now))")
+        XCTAssertEqual(store.displayMessages.count, 1002)
+        XCTAssertEqual(store.displayMessages.last?.id, entry.replyID)
     }
 
     func testHistoryAcknowledgementDoesNotFreezeAnActiveReply() throws {

@@ -19,9 +19,11 @@ struct AttachmentMessageView: View {
     @State private var failedImages: Set<String> = []
     @State private var loadingDetails = true
     @State private var working = false
+    private static let attachmentReference = try! NSRegularExpression(pattern: "(?m)^\\[attachment-message:v1:(msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*)\\]\\r?$")
     private var references: [String] {
-        let regex = try! NSRegularExpression(pattern: "(?m)^\\[attachment-message:v1:(msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*)\\]\\r?$")
-        guard let match = regex.matches(in: message.text, range: NSRange(message.text.startIndex..., in: message.text)).last, let range = Range(match.range(at: 1), in: message.text) else { return [] }
+        guard message.text.contains("[attachment-message:v1:"),
+              let match = Self.attachmentReference.matches(in: message.text, range: NSRange(message.text.startIndex..., in: message.text)).last,
+              let range = Range(match.range(at: 1), in: message.text) else { return [] }
         return message.text[range].split(separator: ",").map(String.init)
     }
     private var loadIdentity: String {
@@ -36,7 +38,7 @@ struct AttachmentMessageView: View {
             // renders the original prompt in a separate conversation bubble.
             // Plain user messages still render their text in this shared view.
             if message.role != "user" || (message.files?.isEmpty != false && references.isEmpty) {
-                GeneratedMessageText(text: text.map { ClientUIContext.strip($0) } ?? (references.isEmpty ? ClientUIContext.strip(message.text) : "附件消息"), message: message, foreground: foreground).environment(\.nativeUIScene, message.sceneID ?? "sbs").environment(\.nativeUIMessage, message.id.uuidString)
+                GeneratedMessageText(text: text.map { ClientUIContext.strip($0) } ?? (references.isEmpty ? ClientUIContext.strip(message.text) : "附件消息"), message: message, foreground: foreground, connection: store.connection).equatable().environment(\.nativeUIScene, message.sceneID ?? "sbs").environment(\.nativeUIMessage, message.id.uuidString)
             }
             ForEach(files) { file in
                 if file.mime.hasPrefix("image/") {
