@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import QuickLook
 import PhotosUI
+import ImageIO
 import UIKit
 import CryptoKit
 
@@ -152,17 +153,27 @@ struct AttachmentPickerRow: View {
     @Environment(\.dismiss) private var dismiss
     @State private var picker = false
     let onCamera: () -> Void
-    @State private var photo: PhotosPickerItem?
+    @State private var photos: [PhotosPickerItem] = []
+    @State private var importingPhotos = false
+    private var remainingSlots: Int { max(0, 10 - store.attachments.count) }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("资源库").font(.title3.weight(.semibold))
             if store.connection != nil {
                 HStack(spacing: 12) {
                     Button(action: onCamera) { resourceCard("camera", "拍照") }
-                    PhotosPicker(selection: $photo, matching: .images) { resourceCard("photo", "照片") }
+                    PhotosPicker(selection: $photos, maxSelectionCount: max(1, remainingSlots), selectionBehavior: .ordered, matching: .images) {
+                        resourceCard("photo", "照片")
+                    }.disabled(remainingSlots == 0)
                     Button { picker = true } label: { resourceCard("doc", "文件") }
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
+                if importingPhotos {
+                    ProgressView("正在导入 \(photos.count) 张照片…")
+                } else {
+                    Text(remainingSlots == 0 ? "已达到 10 个附件上限，可移除后继续添加" : "照片支持多选，还可添加 \(remainingSlots) 个附件")
+                        .font(.caption).foregroundStyle(ClientTheme.secondary)
+                }
                 VStack(spacing: 0) {
                     Button { picker = true } label: {
                         actionRow("paperclip", "添加文件")
@@ -193,15 +204,32 @@ struct AttachmentPickerRow: View {
         .padding(.horizontal, 20)
         .padding(.top, 8)
         .padding(.bottom, 20)
+        .disabled(importingPhotos)
+        .interactiveDismissDisabled(importingPhotos)
             .fileImporter(isPresented: $picker, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in switch result { case .success(let urls): store.importFiles(urls); dismiss(); case .failure(let error): store.notice = error.localizedDescription } }
-            .onChange(of: photo) { item in
-                guard let item else { return }
-                Task {
-                    defer { photo = nil }
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        let url = URL.cachesDirectory.appending(path: "photo-\(UUID().uuidString).jpg")
-                        do { try data.write(to: url); store.importFiles([url]); dismiss() } catch { store.notice = error.localizedDescription }
+            .task(id: photos) {
+                let selection = photos
+                guard !selection.isEmpty else { return }
+                guard selection.count <= remainingSlots else {
+                    photos = []; store.notice = "每条消息最多选择 10 个附件。"; return
+                }
+                let connection = store.connection, scene = store.selected
+                importingPhotos = true
+                defer { importingPhotos = false; photos = [] }
+                var imported: [PendingAttachment] = []
+                do {
+                    for item in selection {
+                        try Task.checkCancellation()
+                        imported.append(try await PhotoAttachmentImport.load(item))
                     }
+                    try Task.checkCancellation()
+                    guard store.connection == connection, store.selected == scene else { throw CancellationError() }
+                    guard imported.count <= remainingSlots else { throw PortalError.server("每条消息最多选择 10 个附件。") }
+                    store.attachments.append(contentsOf: imported)
+                    dismiss()
+                } catch {
+                    await PhotoAttachmentImport.discard(imported)
+                    if !(error is CancellationError) { store.notice = "照片导入失败，请重试：\(error.localizedDescription)" }
                 }
             }
     }
@@ -212,6 +240,32 @@ struct AttachmentPickerRow: View {
     }
     private func actionRow(_ icon: String, _ title: String) -> some View {
         HStack { Image(systemName: icon).font(.system(size: 20)).frame(width: 28).foregroundStyle(ClientTheme.secondary); Text(title); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(ClientTheme.secondary) }.padding(.horizontal, 16).frame(minHeight: 56)
+    }
+}
+
+private enum PhotoAttachmentImport {
+    // Nonisolated async work keeps image inspection and disk writes off the UI actor.
+    static func load(_ item: PhotosPickerItem) async throws -> PendingAttachment {
+        guard let data = try await item.loadTransferable(type: Data.self), !data.isEmpty, data.count <= 50 * 1024 * 1024 else {
+            throw PortalError.server("请选择不超过 50 MB 的非空照片。")
+        }
+        try Task.checkCancellation()
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let identifier = CGImageSourceGetType(source), let type = UTType(identifier as String),
+              let ext = type.preferredFilenameExtension, let mime = type.preferredMIMEType else {
+            throw PortalError.server("无法读取照片格式。")
+        }
+        let directory = URL.documentsDirectory.appending(path: "attachments", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = UUID().uuidString + "." + ext
+        try data.write(to: directory.appending(path: path), options: .atomic)
+        return PendingAttachment(name: "photo-" + path, mime: mime, path: path, size: data.count)
+    }
+
+    static func discard(_ files: [PendingAttachment]) async {
+        for file in files {
+            try? FileManager.default.removeItem(at: URL.documentsDirectory.appending(path: "attachments/" + file.path))
+        }
     }
 }
 
