@@ -2,15 +2,22 @@
 
 日期：2026-10-30（Asia/Shanghai）。
 
-## 待上传构建：0.1.0 (8)
+## 当前构建：0.1.0 (9)
+
+- 2026-10-30：Apple Developer 账户页面确认新版协议已接受。基于 `74261bc`，递增构建号到 9，Release 归档及发行 IPA 校验通过。17:48:44 Xcode 返回 `Uploaded package is processing`、`Upload succeeded` 与 `EXPORT SUCCEEDED`，退出码 0；Apple 已处理完成。17:53 网页确认构建 9 **正在测试**，已关联现有内部和外部两个 `d5` 群组，外部群组的构建列表也确认 **正在测试**。简体中文测试说明已保存，保留自动通知和现有公开链接：https://testflight.apple.com/join/tbMC57cD 。
+- 包含构建 8 的性能、Portal、健康数据和最近活动改动，以及图片多选（最多 10 个附件）和发送失败详情。错误详情包含失败阶段、附件序号、错误码、处理建议和可复制反馈；查看详情不会重发。该改动补充诊断信息，不代表已确认或修复截图中那次发送失败的根因。
+- Swift Core 90 项通过，相关 iOS 附件错误测试及发送失败/重试 UI 场景通过，Release 构建和归档通过。归档源码清单、签名、版本、无 XCTest/Debug dylib 检查通过，二进制与 dSYM UUID 均为 `B3D9A20B-2C9C-34E3-987A-94CF171303A1`。
+- 归档：`artifacts/testflight/Being-0.1.0-9-20261030.xcarchive`；IPA：`ipa-0.1.0-9-20261030/Town.ipa`；上传日志：`upload-0.1.0-9-20261030.log`；校验结果：`verification-0.1.0-9-20261030.json`；源码清单：`source-sha256-0.1.0-9-20261030.json`；测试说明：`what-to-test-0.1.0-9-zh.txt`。
+
+## 本地历史构建：0.1.0 (8)
 
 - 2026-10-30：基于性能及 Portal 修复提交 `f268535`，构建号递增到 8，Release 归档成功。包含交互性能、前后台 Portal 恢复、106 类健康数据与最近活动记录等改动。
 - 归档：`artifacts/testflight/Being-0.1.0-8-20261030.xcarchive`。版本 0.1.0 (8)，最低 iOS 16.0；签名、源码清单一致性、HealthKit 权限说明、隐私清单和 dSYM 校验通过，不包含 XCTest 或 Debug dylib。可执行文件 UUID：`050223B3-8BED-3D4D-BF7E-FCA283714D54`。
-- **尚未导出发行 IPA，尚未上传**：Xcode 导出返回 `Unable to process request - PLA Update available` 与 `No signing certificate "iOS Distribution" found`。Apple Developer 账户页面确认，团队账户持有人需要接受新版 Apple Developer Program License Agreement，才能恢复证书、App Store Connect 和 API 访问；当前 App 管理账号无法完成此步骤。
-- 已准备简体中文测试说明、导出配置和源码清单。协议处理后复用本次归档，导出并校验发行 IPA，再上传并关联现有 d5 测试群组；恢复前需确认构建 8 未被其他发布占用。
+- **未导出发行 IPA，未上传**：当时 Xcode 导出返回 `Unable to process request - PLA Update available` 与 `No signing certificate "iOS Distribution" found`。当时 Apple Developer 账户页面确认，团队账户持有人需要接受新版 Apple Developer Program License Agreement，才能恢复证书、App Store Connect 和 API 访问，App 管理账号无法完成此步骤。该限制已在构建 9 发布前解除。
+- 已准备简体中文测试说明、导出配置和源码清单。该归档不包含后续图片多选和错误详情。随后图片多选代码使用构建号 8 在本地安装到手机，但未上传；正式发布改用包含全部最新改动的构建 9。
 - 证据：`artifacts/testflight/archive-0.1.0-8-20261030.log`、`export-0.1.0-8-20261030.log`、`source-sha256-0.1.0-8-20261030.json`、`verification-0.1.0-8-20261030.json`、`what-to-test-0.1.0-8-zh.txt`。
 
-## 当前构建：0.1.0 (7)
+## 此前已分发构建：0.1.0 (7)
 
 - **2026-10-23 18:24:57** 最终包上传成功，Xcode 返回 `Uploaded package is processing`、`Upload succeeded` 与 `EXPORT SUCCEEDED`。网页已确认构建 7 **正在测试**，关联现有内部与外部两个 `d5` 群组，简体中文测试说明已保存，保留自动通知。外测链接：https://testflight.apple.com/join/tbMC57cD 。
 - 包含聊天发送/流式去重/性能、侧栏与思考折叠、移动生图布局、iOS Portal 与系统权限/HealthKit。发布前全量改动 Review 及修复详见 [发布 Review](RELEASE-REVIEW-2026-10-23.md)。
