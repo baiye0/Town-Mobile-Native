@@ -157,6 +157,8 @@ extension Store {
             defer { busy = false; activeScene = nil; activeSendID = nil; streamID = nil; streamingReplyID = nil; activity = ""; worker = nil; persist(); startDelivery() }
             guard let index = outbox.firstIndex(where: { $0.id == first.id }) else { return }
             var entry = outbox[index]
+            var failureStage = "准备消息"
+            var sendFailure: String?
             @MainActor func checkpoint(background: Bool = false) throws {
                 try updateCheckpoint(entry)
                 if background {
@@ -178,10 +180,13 @@ extension Store {
                         entry.preparedText = try await prepareFiles(&entry, connection: c)
                     }
                     if entry.intelligentUI == true { entry.preparedText = (entry.preparedText ?? entry.text) + (Bundle.main.url(forResource: "iui-context", withExtension: "txt").flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? NativeUI.context) + (entry.intelligentUISelection.map { "\n\n[客户端当前界面选择]\n" + $0 + "\n[/客户端当前界面选择]" } ?? "") }
+                    failureStage = "同步消息记录"
                     entry.baseline = try await historyBaseline(c, after: entry.baseline)
+                    failureStage = "更新附件消息状态"
                     if let id = entry.attachmentMessageID { _ = try await attachmentJSON(c, "/api/attachment-messages/\(id)", body: ["delivery_status":"sending"]) }
                     entry.phase = "sending"; try checkpoint()
                     project(entry)
+                    failureStage = "发送消息"
                     let request = request(c, "/api/chat/stream", method: "POST", body: ["message": entry.preparedText ?? entry.text, "scene_id": entry.sceneID, "scene_meta": ["client": "being-ios/0.3", "scene_label": entry.title]])
                     do {
                         let (bytes, response) = try await session.bytes(for: request)
@@ -224,17 +229,22 @@ extension Store {
                             if completed && ReplyStream.hasFinalReply(entry) { safeToContinue = true }
                         }
                     } catch is CancellationError { throw CancellationError() }
-                    catch { if entry.phase == "failed" { throw error }; activity = "正在恢复连接" }
+                    catch {
+                        if entry.phase == "failed" { throw error }
+                        sendFailure = "发送请求未正常完成\n" + DeliveryDiagnostics.reason(error)
+                        activity = "正在恢复连接"
+                    }
                 }
-                if !safeToContinue { project(entry); safeToContinue = try await self.recover(&entry, connection: c) }
+                if !safeToContinue { failureStage = "恢复回复"; project(entry); safeToContinue = try await self.recover(&entry, connection: c) }
                 if safeToContinue {
                     _ = try? await reconcile(&entry, connection: c)
+                    failureStage = "保存消息"
                     guard persist() else { throw PortalError.server("无法保存已完成的回复") }
                     let previous = outbox
                     outbox.removeAll { $0.id == entry.id }; do { try saveOutbox() } catch { outbox = previous; throw error }
                     if notice == "发送未完成，请查看发送队列。" { notice = nil }
                     CompletionNotifications.shared.finished(endpoint: c.endpoint, scene: entry.sceneID, title: entry.title, shouldNotify: !appActive || !chatVisible || selected != entry.sceneID)
-                } else { entry.phase = "unknown"; entry.error = "发送结果待确认；可同步历史或移除本地等待记录，不会自动重发。"; try checkpoint() }
+                } else { entry.phase = "unknown"; entry.error = [sendFailure, "发送结果待确认；核对结果后再重试，不会自动重发。"].compactMap { $0 }.joined(separator: "\n"); try checkpoint() }
             } catch is CancellationError {
                 if let i = outbox.firstIndex(where: { $0.id == entry.id }), outbox[i].phase == "stopped" {
                     entry.phase = "stopped"
@@ -246,7 +256,7 @@ extension Store {
             catch {
                 if ["queued", "preparing"].contains(entry.phase) { entry.phase = "failed" }
                 else if entry.phase != "failed" { entry.phase = "unknown" }
-                entry.error = error.localizedDescription
+                entry.error = DeliveryDiagnostics.step(error, stage: failureStage).localizedDescription
                 try? checkpoint()
                 project(entry)
                 // An uncertain result is a recoverable queue row, not a

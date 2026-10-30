@@ -338,19 +338,76 @@ struct ChatView: View {
 }
 struct DeliveryStatusView: View {
     let message: Message
+    var showsSummary = false
     @EnvironmentObject private var store: Store
+    @State private var showsDetails = false
     private var entry: PendingSend? { store.outbox.first { $0.userID == message.id && $0.endpoint == store.connection?.endpoint } }
     var body: some View {
         if let entry {
             if DeliveryRules.showsRetry(entry.phase) {
-                Button { store.retryQueued(entry.id) } label: {
-                    Image(systemName: "exclamationmark.circle.fill").font(.system(size: 22))
-                        .foregroundStyle(.red).frame(width: 44, height: 44)
+                Button { showsDetails = true } label: {
+                    if showsSummary {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(DeliveryDiagnostics.detail(entry)).lineLimit(2).multilineTextAlignment(.trailing)
+                            Text("查看详情").foregroundStyle(ClientTheme.secondary)
+                        }.font(.caption).foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                            .padding(.trailing, 56) // Keep the floating scroll-to-bottom control clear of the explanation.
+                    } else {
+                        Image(systemName: "exclamationmark.circle.fill").font(.system(size: 22))
+                            .foregroundStyle(.red).frame(width: 44, height: 44)
+                    }
                 }.buttonStyle(.plain)
-                    .disabled(entry.phase == "unknown" && store.busy)
-                    .accessibilityLabel("重试发送")
-                    .accessibilityHint(entry.error ?? "消息未发送成功，点击重试")
-                    .accessibilityIdentifier("retryMessage")
+                    .accessibilityLabel("查看发送错误")
+                    .accessibilityHint(DeliveryDiagnostics.detail(entry))
+                    .accessibilityIdentifier(showsSummary ? "deliveryFailureSummary" : "retryMessage")
+                    .sheet(isPresented: $showsDetails) { DeliveryFailureDetails(entryID: entry.id) }
+            }
+        }
+    }
+}
+
+private struct DeliveryFailureDetails: View {
+    let entryID: String
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+    @State private var copied = false
+
+    var body: some View {
+        NavigationStack {
+            if let entry = store.visibleOutbox.first(where: { $0.id == entryID }) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Text(DeliveryDiagnostics.detail(entry))
+                            .textSelection(.enabled).accessibilityIdentifier("deliveryFailureReason")
+                        if entry.phase == "unknown" {
+                            Text("服务可能已经收到这条消息。重试前会先核对发送结果，避免重复发送。")
+                                .font(.callout).foregroundStyle(ClientTheme.secondary)
+                        }
+                        Button {
+                            let info = Bundle.main.infoDictionary ?? [:]
+                            let version = "\(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
+                            UIPasteboard.general.string = DeliveryDiagnostics.report(entry, version: version)
+                            copied = true
+                        } label: { Label(copied ? "已复制错误信息" : "复制错误信息", systemImage: "doc.on.doc") }
+                            .buttonStyle(.bordered).accessibilityIdentifier("copyDeliveryFailure")
+                        Button(entry.phase == "unknown" ? "核对并重试" : "重试发送") {
+                            store.retryQueued(entry.id)
+                            dismiss()
+                        }.buttonStyle(.borderedProminent)
+                            .disabled(entry.phase == "unknown" && store.busy)
+                            .accessibilityIdentifier("confirmRetryMessage")
+                        if entry.phase == "unknown" && store.busy {
+                            Text("请等待当前回复完成后再核对这条消息。").font(.caption).foregroundStyle(ClientTheme.secondary)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
+                }
+                .navigationTitle(entry.phase == "unknown" ? "发送结果待确认" : "发送失败")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            } else {
+                Text("这条消息已处理。")
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
             }
         }
     }

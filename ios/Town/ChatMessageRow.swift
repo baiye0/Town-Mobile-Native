@@ -124,6 +124,7 @@ struct ChatMessageRow: View {
                     if !isUser { Spacer(minLength: 24) }
                 }
                 if isUser {
+                    DeliveryStatusView(message: message, showsSummary: true)
                     let running = store.busy && store.outbox.contains {
                         $0.id == store.activeSendID && $0.userID == message.id && $0.endpoint == store.connection?.endpoint
                     }

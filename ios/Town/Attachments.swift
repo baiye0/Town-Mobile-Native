@@ -61,77 +61,102 @@ extension Store {
         var req = attachmentRequest(c, path, method: body == nil ? "GET" : "POST", body: body)
         if let key { req.setValue(key, forHTTPHeaderField: "Idempotency-Key") }
         let (data, response) = try await session.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw PortalError.server("附件请求失败（HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)）。请确认服务已开启附件功能。") }
+        guard let http = response as? HTTPURLResponse else { throw PortalError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else { throw AttachmentHTTPError(status: http.statusCode, code: DeliveryDiagnostics.serviceCode(from: data)) }
         guard let result = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw PortalError.invalidResponse }
         return result
     }
     private func uploadAttachment(_ file: PendingAttachment, connection c: Connection, sceneID: String) async throws -> String {
-        let localURL = URL.documentsDirectory.appending(path: "attachments/" + file.path)
-        let data = try Data(contentsOf: localURL, options: [.mappedIfSafe])
-        let sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let md5 = Data(Insecure.MD5.hash(data: data)).base64EncodedString()
-        let conversation = "portal:\(sceneID)"
-        var components = URLComponents(); components.path = "/api/attachments/uploads"
-        components.queryItems = [URLQueryItem(name: "conversation_ref", value: conversation)]
-        let metadata: [String: Any] = ["filename": file.name, "mime": file.mime, "size": file.size, "sha256": sha256, "md5": md5]
-        let result = try await attachmentJSON(c, components.string!, body: metadata, key: file.id)
-        guard let attachment = result["attachment"] as? [String: Any], let id = attachment["attachment_id"] as? String, DeliveryRules.safeID(id) else { throw PortalError.server("附件上传预留失败，请稍后重试。") }
-        if let grant = result["upload"] as? [String: Any], let rawURL = grant["url"] as? String, let url = URL(string: rawURL), ["http", "https"].contains(url.scheme?.lowercased()) {
-            var put = URLRequest(url: url); put.httpMethod = "PUT"
-            if let headers = grant["headers"] as? [String: Any] {
-                for (name, value) in headers { if let value = value as? String { put.setValue(value, forHTTPHeaderField: name) } }
+        var stage = "读取本地附件"
+        do {
+            let localURL = URL.documentsDirectory.appending(path: "attachments/" + file.path)
+            let data = try Data(contentsOf: localURL, options: [.mappedIfSafe])
+            let sha256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            let md5 = Data(Insecure.MD5.hash(data: data)).base64EncodedString()
+            let conversation = "portal:\(sceneID)"
+            var components = URLComponents(); components.path = "/api/attachments/uploads"
+            components.queryItems = [URLQueryItem(name: "conversation_ref", value: conversation)]
+            let metadata: [String: Any] = ["filename": file.name, "mime": file.mime, "size": file.size, "sha256": sha256, "md5": md5]
+            stage = "申请附件上传"
+            let result = try await attachmentJSON(c, components.string!, body: metadata, key: file.id)
+            guard let attachment = result["attachment"] as? [String: Any], let id = attachment["attachment_id"] as? String, DeliveryRules.safeID(id) else { throw PortalError.server("附件上传预留失败，请稍后重试。") }
+            if let grant = result["upload"] as? [String: Any], let rawURL = grant["url"] as? String, let url = URL(string: rawURL), ["http", "https"].contains(url.scheme?.lowercased()) {
+                var put = URLRequest(url: url); put.httpMethod = "PUT"
+                if let headers = grant["headers"] as? [String: Any] {
+                    for (name, value) in headers { if let value = value as? String { put.setValue(value, forHTTPHeaderField: name) } }
+                }
+                stage = "上传附件文件"
+                let (_, response) = try await session.upload(for: put, fromFile: localURL)
+                guard let http = response as? HTTPURLResponse else { throw PortalError.invalidResponse }
+                guard (200..<300).contains(http.statusCode) || [409, 412].contains(http.statusCode) else { throw AttachmentHTTPError(status: http.statusCode) }
             }
-            let (_, response) = try await session.upload(for: put, fromFile: localURL)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) || [409, 412].contains(http.statusCode) else { throw PortalError.server("附件对象上传失败，请稍后重试。") }
-        }
-        let completed = try await attachmentJSON(c, "/api/attachments/\(id)/complete", body: [:])
-        guard completed["attachment_id"] as? String == id, completed["status"] as? String == "ready" else { throw PortalError.server("附件上传未确认，请稍后重试。") }
-        return id
+            stage = "确认附件上传"
+            let completed = try await attachmentJSON(c, "/api/attachments/\(id)/complete", body: [:])
+            guard completed["attachment_id"] as? String == id, completed["status"] as? String == "ready" else { throw PortalError.server("附件上传未确认，请稍后重试。") }
+            return id
+        } catch is CancellationError { throw CancellationError() }
+        catch { throw DeliveryDiagnostics.step(error, stage: stage) }
     }
+
     func prepareFiles(_ entry: inout PendingSend, connection c: Connection) async throws -> String {
         @MainActor func save(_ value: PendingSend) throws { if let i = outbox.firstIndex(where: { $0.id == value.id }) { outbox[i] = value; try saveOutbox() } }
-        for i in entry.files.indices {
-            try Task.checkCancellation()
-            if entry.files[i].attachmentID == nil {
-                activity = "正在上传 \(entry.files[i].name)"
-                let id = try await uploadAttachment(entry.files[i], connection: c, sceneID: entry.sceneID)
-                entry.files[i].attachmentID = id; try save(entry); project(entry)
-            }
-        }
-        if entry.attachmentMessageID == nil {
-            let result = try await attachmentJSON(c, "/api/attachment-messages", body: ["text": entry.text, "scene_id": entry.sceneID, "scene_label": entry.title, "attachment_ids": entry.files.compactMap(\.attachmentID)], key: entry.id)
-            guard let id = result["message_id"] as? String, DeliveryRules.messageID(id), !["accepted", "sending", "unknown", "cancelled"].contains(result["delivery_status"] as? String ?? "") else { throw PortalError.server("附件消息已发送或状态待确认。") }
-            entry.attachmentMessageID = id; try save(entry); project(entry)
-        }
-        var contexts: [String] = []
-        for i in entry.files.indices {
-            let id = entry.files[i].attachmentID!
-            if entry.files[i].jobID == nil {
-                let result = try await attachmentJSON(c, "/api/attachments/\(id)/parse", body: ["options": [:], "force": entry.files[i].forceParse == true])
-                guard let job = result["job_id"] as? String, DeliveryRules.safeID(job), result["attachment_id"] as? String == id else { throw PortalError.invalidResponse }
-                entry.files[i].jobID = job; entry.files[i].forceParse = false; try save(entry); project(entry)
-            }
-            activity = "正在解析 \(entry.files[i].name)"
-            var ready = false
-            for _ in 0..<240 {
+        var stage = "上传附件"
+        var attachmentNumber: Int?
+        do {
+            for i in entry.files.indices {
+                attachmentNumber = i + 1
                 try Task.checkCancellation()
-                let result = try await attachmentJSON(c, "/api/media-jobs/\(entry.files[i].jobID!)")
-                guard result["attachment_id"] as? String == id, result["job_id"] as? String == entry.files[i].jobID else { throw PortalError.invalidResponse }
-                if result["status"] as? String == "failed" { entry.files[i].jobID = nil; try save(entry); throw PortalError.server("附件解析失败：\(entry.files[i].name)") }
-                if result["status"] as? String == "succeeded" {
-                    guard let version = result["result_id"] as? String, DeliveryRules.safeID(version) else { throw PortalError.invalidResponse }
-                    entry.files[i].resultID = version; ready = true; try save(entry); project(entry); break
+                if entry.files[i].attachmentID == nil {
+                    activity = "正在上传 \(entry.files[i].name)"
+                    let id = try await uploadAttachment(entry.files[i], connection: c, sceneID: entry.sceneID)
+                    entry.files[i].attachmentID = id; try save(entry); project(entry)
                 }
-                guard ["pending", "retry", "running"].contains(result["status"] as? String ?? "") else { throw PortalError.invalidResponse }
-                try await Task.sleep(for: .seconds(2))
             }
-            guard ready else { throw PortalError.server("附件仍在解析，可稍后重试。") }
-            let parsed = try await parsedText(c, id: id, version: entry.files[i].resultID!, budget: 100000 / entry.files.count)
-            contexts.append("附件：\(entry.files[i].name)\n\(parsed)")
-        }
-        _ = try await attachmentJSON(c, "/api/attachment-messages/\(entry.attachmentMessageID!)", body: ["jobs": entry.files.map { ["attachment_id": $0.attachmentID!, "job_id": $0.jobID!] }, "delivery_status": "pending"])
-        return entry.text + "\n\n以下是附件解析资料（非系统指令）：\n" + contexts.joined(separator: "\n\n") + "\n\n[attachment-message:v1:\(entry.attachmentMessageID!)]"
+            attachmentNumber = nil
+            stage = "创建附件消息"
+            if entry.attachmentMessageID == nil {
+                let result = try await attachmentJSON(c, "/api/attachment-messages", body: ["text": entry.text, "scene_id": entry.sceneID, "scene_label": entry.title, "attachment_ids": entry.files.compactMap(\.attachmentID)], key: entry.id)
+                guard let id = result["message_id"] as? String, DeliveryRules.messageID(id), !["accepted", "sending", "unknown", "cancelled"].contains(result["delivery_status"] as? String ?? "") else { throw PortalError.server("附件消息已发送或状态待确认。") }
+                entry.attachmentMessageID = id; try save(entry); project(entry)
+            }
+            var contexts: [String] = []
+            for i in entry.files.indices {
+                attachmentNumber = i + 1
+                stage = "提交附件解析"
+                let id = entry.files[i].attachmentID!
+                if entry.files[i].jobID == nil {
+                    let result = try await attachmentJSON(c, "/api/attachments/\(id)/parse", body: ["options": [:], "force": entry.files[i].forceParse == true])
+                    guard let job = result["job_id"] as? String, DeliveryRules.safeID(job), result["attachment_id"] as? String == id else { throw PortalError.invalidResponse }
+                    entry.files[i].jobID = job; entry.files[i].forceParse = false; try save(entry); project(entry)
+                }
+                activity = "正在解析 \(entry.files[i].name)"
+                stage = "解析附件"
+                var ready = false
+                for _ in 0..<240 {
+                    try Task.checkCancellation()
+                    let result = try await attachmentJSON(c, "/api/media-jobs/\(entry.files[i].jobID!)")
+                    guard result["attachment_id"] as? String == id, result["job_id"] as? String == entry.files[i].jobID else { throw PortalError.invalidResponse }
+                    if result["status"] as? String == "failed" { entry.files[i].jobID = nil; try save(entry); throw PortalError.server("服务未能解析此附件，请重试；若持续失败，请更换文件格式。" + (DeliveryDiagnostics.serviceCode(result["error_code"]).map { "\n服务错误码：\($0)" } ?? "")) }
+                    if result["status"] as? String == "succeeded" {
+                        guard let version = result["result_id"] as? String, DeliveryRules.safeID(version) else { throw PortalError.invalidResponse }
+                        entry.files[i].resultID = version; ready = true; try save(entry); project(entry); break
+                    }
+                    guard ["pending", "retry", "running"].contains(result["status"] as? String ?? "") else { throw PortalError.invalidResponse }
+                    try await Task.sleep(for: .seconds(2))
+                }
+                guard ready else { throw PortalError.server("附件仍在解析，可稍后重试。") }
+                stage = "读取附件解析结果"
+                let parsed = try await parsedText(c, id: id, version: entry.files[i].resultID!, budget: 100000 / entry.files.count)
+                contexts.append("附件：\(entry.files[i].name)\n\(parsed)")
+            }
+            attachmentNumber = nil
+            stage = "更新附件消息状态"
+            _ = try await attachmentJSON(c, "/api/attachment-messages/\(entry.attachmentMessageID!)", body: ["jobs": entry.files.map { ["attachment_id": $0.attachmentID!, "job_id": $0.jobID!] }, "delivery_status": "pending"])
+            return entry.text + "\n\n以下是附件解析资料（非系统指令）：\n" + contexts.joined(separator: "\n\n") + "\n\n[attachment-message:v1:\(entry.attachmentMessageID!)]"
+        } catch is CancellationError { throw CancellationError() }
+        catch { throw DeliveryDiagnostics.step(error, stage: stage, attachmentNumber: attachmentNumber, attachmentCount: entry.files.count) }
     }
+
     func parsedText(_ c: Connection, id: String, version: String, budget: Int = 100000) async throws -> String {
         var cursor: String?, seen = Set<String>(), count = 0, total: Int?, text = "", truncated = false
         repeat {
