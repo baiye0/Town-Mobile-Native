@@ -1,6 +1,14 @@
 # Being Town 0.1.0 TestFlight
 
-日期：2026-10-23（Asia/Shanghai）。
+日期：2026-10-30（Asia/Shanghai）。
+
+## 待上传构建：0.1.0 (8)
+
+- 2026-10-30：基于性能及 Portal 修复提交 `f268535`，构建号递增到 8，Release 归档成功。包含交互性能、前后台 Portal 恢复、106 类健康数据与最近活动记录等改动。
+- 归档：`artifacts/testflight/Being-0.1.0-8-20261030.xcarchive`。版本 0.1.0 (8)，最低 iOS 16.0；签名、源码清单一致性、HealthKit 权限说明、隐私清单和 dSYM 校验通过，不包含 XCTest 或 Debug dylib。可执行文件 UUID：`050223B3-8BED-3D4D-BF7E-FCA283714D54`。
+- **尚未导出发行 IPA，尚未上传**：Xcode 导出返回 `Unable to process request - PLA Update available` 与 `No signing certificate "iOS Distribution" found`。Apple Developer 账户页面确认，团队账户持有人需要接受新版 Apple Developer Program License Agreement，才能恢复证书、App Store Connect 和 API 访问；当前 App 管理账号无法完成此步骤。
+- 已准备简体中文测试说明、导出配置和源码清单。协议处理后复用本次归档，导出并校验发行 IPA，再上传并关联现有 d5 测试群组；恢复前需确认构建 8 未被其他发布占用。
+- 证据：`artifacts/testflight/archive-0.1.0-8-20261030.log`、`export-0.1.0-8-20261030.log`、`source-sha256-0.1.0-8-20261030.json`、`verification-0.1.0-8-20261030.json`、`what-to-test-0.1.0-8-zh.txt`。
 
 ## 当前构建：0.1.0 (7)
 

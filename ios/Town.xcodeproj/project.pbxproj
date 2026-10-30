@@ -160,7 +160,7 @@
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "按你在系统中选择的范围，向当前 Being 提供活动、睡眠、锻炼、心肺、营养、生理周期与身体指标，用于健康和活动回顾。只读取，不修改。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "本版本仅在你选择共享后读取健康数据，不会请求写入权限，也不会写入或修改健康数据。";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 7N8XHQWCNN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Being;
@@ -199,7 +199,7 @@
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "按你在系统中选择的范围，向当前 Being 提供活动、睡眠、锻炼、心肺、营养、生理周期与身体指标，用于健康和活动回顾。只读取，不修改。";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "本版本仅在你选择共享后读取健康数据，不会请求写入权限，也不会写入或修改健康数据。";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEVELOPMENT_TEAM = 7N8XHQWCNN;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Being;
