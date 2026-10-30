@@ -10,7 +10,7 @@ extension IOSPortalStore {
         var result = [
             tool("portal_status", "iOS Portal version, connection and actual supported capabilities."),
             tool("portal_ios_capabilities", "Current Being grants and independent iOS system permission status. Permissions must be enabled on the phone."),
-            tool("portal_ios_actions", "Poll a native write by request_id. pending means NOT executed; unknown requires checking the system app. Never retry with a new request_id to bypass approval.", ["request_id": string()], required: ["request_id"]),
+            tool("portal_ios_actions", "Poll a native write by request_id. Writes execute immediately; unknown means the system result needs checking before retrying.", ["request_id": string()], required: ["request_id"]),
             tool("portal_ios_activity", "Recent tool execution status; contains no arguments or personal data.")
         ]
         if options.files {
@@ -29,7 +29,7 @@ extension IOSPortalStore {
             var properties: [String: Any] = ["action": ["type": "string", "enum": actions]]
             if capability != "location" {
                 properties.merge(["id": string("System record identifier"), "query": string("Literal search text")]) { _, new in new }
-                if write { properties["request_id"] = string("Required for every write. Reuse same ID and identical arguments after a timeout.") }
+                if write { properties["request_id"] = string("Optional idempotency key. Reuse the same ID and identical arguments when retrying an uncertain result.") }
                 if capability == "contacts" {
                     if write { properties.merge(["given_name": string(), "family_name": string(), "phones": ["type": "array", "items": string(), "maxItems": 20], "emails": ["type": "array", "items": string(), "maxItems": 20]]) { _, new in new } }
                 } else {
@@ -46,7 +46,7 @@ extension IOSPortalStore {
                 }
             }
             result.append(tool("portal_ios_" + capability,
-                "iOS \(capability). Writes queue for explicit phone confirmation; use portal_ios_actions to poll. System permission is also required. Lists return at most 200 items. Calendar/reminder recurring records cannot be modified; calendar invitations are not supported. Updates preserve omitted fields; contact phone/email arrays replace those fields.", properties, required: ["action"]))
+                "iOS \(capability). Writes execute immediately when this Being and the system grant are available; portal_ios_actions can inspect a recorded result. System permission is also required. Lists return at most 200 items. Calendar/reminder recurring records cannot be modified; calendar invitations are not supported. Updates preserve omitted fields; contact phone/email arrays replace those fields.", properties, required: ["action"]))
         }
         let healthCategories = IOSPortalHealth.categories.map(\.id).filter { options.grants.contains("health." + $0 + ".read") }
         if !healthCategories.isEmpty, health.available {
@@ -71,6 +71,10 @@ extension IOSPortalStore {
             guard params["arguments"] == nil || params["arguments"] is [String: Any] else { return error(-32602, "Invalid arguments") }
             let args = params["arguments"] as? [String: Any] ?? [:]
             let owner = connection, currentGeneration = generation
+            let activityID = UUID()
+            // Status/capability polling must not bury actual data reads.
+            let logActivity = !["portal_status", "portal_ios_capabilities", "portal_ios_activity", "portal_ios_actions"].contains(name)
+            if logActivity { record(name, "执行中", id: activityID) }
             do {
                 try validateArguments(args, definition: definition)
                 let value = try await call(name, args)
@@ -79,11 +83,16 @@ extension IOSPortalStore {
                 let text = String(data: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), encoding: .utf8)!
                 guard text.utf8.count <= 1024 * 1024 else { throw PortalError.server("结果过大，请缩小查询范围。") }
                 result = ["content": [["type": "text", "text": text]], "isError": false]
-                record(name, value["status"] as? String == "pending" ? "待确认" : "已完成")
+                if logActivity {
+                    let rows = value["records"] as? [[String: Any]]
+                    let status = value["status"] as? String == "unknown" ? "结果待核实" : rows.map { $0.isEmpty ? "读取完成 · 无可用记录" : "读取完成 · \($0.count) 条" } ?? "已完成"
+                    record(name, status, id: activityID)
+                }
             } catch {
                 guard owner == connection, currentGeneration == generation, !Task.isCancelled else { return nil }
                 let message = error is PortalError ? error.localizedDescription : "操作失败，请检查权限、参数和本地文件。"
-                result = ["content": [["type": "text", "text": message]], "isError": true]; record(name, "失败")
+                result = ["content": [["type": "text", "text": message]], "isError": true]
+                if logActivity { record(name, "失败", id: activityID) }
             }
         default: return error(-32601, "Method not found")
         }
@@ -127,7 +136,7 @@ extension IOSPortalStore {
         switch name {
         case "portal_status": return ["version": "0.2.0-ios", "platform": "ios", "name": options.name, "connection": phase, "background": "foreground_only", "tools": tools.compactMap { $0["name"] as? String }, "unsupported": ["exec", "process", "web_fetch", "screenshot", "notification_access", "geofences", "kits", "subagent"]]
         case "portal_ios_capabilities":
-            return ["grants": options.grants.sorted(), "system_access": Dictionary(uniqueKeysWithValues: ["calendar", "reminders", "contacts", "location"].map { ($0, permissions.permission($0).label) }), "health": ["available": health.available, "linked": healthLinked, "read_authorization": "not_disclosed", "write_access": false, "categories": IOSPortalHealth.categories.filter { options.grants.contains("health." + $0.id + ".read") }.map { ["category": $0.id, "name": $0.title, "unit": $0.unitName ?? "", "aggregation": IOSPortalHealth.dailyTotals.contains($0.id) ? "daily_sum" : "samples"] }, "query_example": ["category": options.grants.contains("health.sleep.read") ? "sleep" : (IOSPortalHealth.categories.first { options.grants.contains("health." + $0.id + ".read") }?.id ?? "sleep")], "default_days": 7, "max_days": 31, "input_schema": tools.first { $0["name"] as? String == "portal_ios_health" }?["inputSchema"] ?? NSNull()], "writes": "phone_confirmation_required", "background": "foreground_only"]
+            return ["grants": options.grants.sorted(), "system_access": Dictionary(uniqueKeysWithValues: ["calendar", "reminders", "contacts", "location"].map { ($0, permissions.permission($0).label) }), "health": ["available": health.available, "linked": healthLinked, "read_authorization": "not_disclosed", "write_access": false, "categories": IOSPortalHealth.categories.filter { options.grants.contains("health." + $0.id + ".read") }.map { ["category": $0.id, "name": $0.title, "unit": $0.unitName ?? "", "aggregation": IOSPortalHealth.dailyTotals.contains($0.id) ? "daily_sum" : "samples"] }, "query_example": ["category": options.grants.contains("health.sleep.read") ? "sleep" : (IOSPortalHealth.categories.first { options.grants.contains("health." + $0.id + ".read") }?.id ?? "sleep")], "default_days": 7, "max_days": 31, "input_schema": tools.first { $0["name"] as? String == "portal_ios_health" }?["inputSchema"] ?? NSNull()], "writes": "immediate_with_being_and_system_grants", "background": "foreground_only"]
         case "portal_ios_actions":
             let id = try LocalPortalRules.string(args, "request_id", max: 128)
             guard let item = actions.first(where: { $0.id == id }) else { throw PortalError.server("未找到请求记录。") }; return actionResult(item)

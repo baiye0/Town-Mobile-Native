@@ -17,7 +17,7 @@ extension SocialStore {
             let actual = field(hello,"town_id","being_id")
             guard hello["anonymous"] as? Bool == false, hello["token_kind"] as? String == "client", actual == expected || !expected.hasPrefix("t_") && hello["being_id"] as? String == expected else { throw PortalError.server("凭据与填写的小镇身份不一致。") }
             let value = TownIdentity(token:token,id:actual,name:field(hello,"display_name","display"))
-            try TownVault.save(value); stopLive(); identity = value; counts = [:]; seen = []; revision += 1; startLive(); return
+            try TownVault.save(value); stopLive(); identity = value; resetUnread(); revision += 1; startLive(); return
         }
         throw PortalError.server("未收到小镇身份确认。")
     }

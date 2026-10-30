@@ -22,16 +22,59 @@ func field(_ record: [String: Any], _ names: String...) -> String {
     @Published var status = "尚未配对"
     @Published var revision = 0
     @Published var counts: [String: Int] = [:]
-    var seen: Set<String> = []
+    private var seen: Set<String> = []
+    @Published private(set) var firesideUnread: [String: Set<String>] = [:]
     private var live: Task<Void, Never>?
     private let session = URLSession(configuration: .ephemeral, delegate: NoRedirect(), delegateQueue: nil)
     init() {
         #if DEBUG && targetEnvironment(simulator)
-        if SocialLayoutFixture.enabled { identity = SocialLayoutFixture.identity; status = "布局预览" }
+        if SocialLayoutFixture.enabled {
+            identity = SocialLayoutFixture.identity; status = "布局预览"
+            if ProcessInfo.processInfo.arguments.contains("--social-unread-fixture") {
+                for room in ["garden", "reading"] {
+                    for id in ["post-one", "post-two"] {
+                        _ = receive(eventType: "fireside", object: ["fireside_id": room, "id": id, "sender_town_id": "t_lin"])
+                    }
+                }
+            }
+        }
         #endif
     }
     func unread(_ destination: Destination) -> Int { counts[destination.rawValue] ?? 0 }
-    func acknowledge(_ kind: Destination) { counts[kind.rawValue] = 0 }
+    func unread(firesideID: String) -> Int { firesideUnread[firesideID]?.count ?? 0 }
+    func acknowledge(_ kind: Destination) {
+        // Visiting the room directory must never mark its conversations as read.
+        guard kind != .firesides else { return }
+        counts[kind.rawValue] = 0
+    }
+    func acknowledge(firesideID: String, messages: [[String: Any]]) {
+        guard !firesideID.isEmpty, var pending = firesideUnread[firesideID] else { return }
+        let displayed = Set(messages.flatMap { message in
+            [field(message, "id"), field(message, "seq")].filter { !$0.isEmpty }
+        })
+        pending.subtract(displayed)
+        guard pending != firesideUnread[firesideID] else { return }
+        firesideUnread[firesideID] = pending.isEmpty ? nil : pending
+        counts["firesides"] = firesideUnread.values.reduce(0) { $0 + $1.count }
+    }
+    func resetUnread() { counts = [:]; firesideUnread = [:]; seen = [] }
+    /// Records an event once; the caller decides whether to post a notification.
+    @discardableResult func receive(eventType: String, object: [String: Any]) -> String? {
+        guard let identity,
+              let channel = ["dm": "mail", "bonfire": "bonfire", "fireside": "firesides"][eventType] else { return nil }
+        let room = field(object, "fireside_id")
+        let message = field(object, "id", "seq")
+        let key = eventType + ":" + room + ":" + message
+        guard seen.insert(key).inserted else { return nil }
+        if seen.count > 5000 { seen = [key] }
+        revision += 1
+        guard ![field(object, "sender_town_id"), field(object, "town_id"), field(object, "being_id")].contains(identity.id) else { return nil }
+        if channel == "firesides" {
+            firesideUnread[room, default: []].insert(message)
+            counts[channel] = firesideUnread.values.reduce(0) { $0 + $1.count }
+        } else { counts[channel, default: 0] += 1 }
+        return channel
+    }
     func request(_ path: String, privateRoute: Bool = true, body: [String: Any]? = nil) async throws -> [String: Any] {
         guard path.hasPrefix("/api") else { throw PortalError.invalidResponse }
         #if DEBUG && targetEnvironment(simulator)
@@ -66,9 +109,9 @@ func field(_ record: [String: Any], _ names: String...) -> String {
         try TownContracts.validatePair(input: id, townID: data["town_id"] as? String, beingID: data["being_id"] as? String, token: token)
         let returned = field(data, "town_id", "being_id")
         let value = TownIdentity(token: token, id: returned.isEmpty ? id : returned, name: field(data, "display_name", "speaker_name", "display"))
-        try Task.checkCancellation(); try TownVault.save(value); identity = value; counts = [:]; seen = []; revision += 1; startLive()
+        try Task.checkCancellation(); try TownVault.save(value); identity = value; resetUnread(); revision += 1; startLive()
     }
-    func unpair() { stopLive(); try? TownVault.save(nil); identity = nil; counts = [:]; seen = []; status = "尚未配对"; revision += 1 }
+    func unpair() { stopLive(); try? TownVault.save(nil); identity = nil; resetUnread(); status = "尚未配对"; revision += 1 }
     func stopLive() { live?.cancel(); live = nil }
     func startLive() {
         #if DEBUG && targetEnvironment(simulator)
@@ -86,27 +129,34 @@ func field(_ record: [String: Any], _ names: String...) -> String {
                     let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                     if [401,403].contains(code) { status = "配对已失效，请重新配对"; return }
                     guard code == 200 else { throw PortalError.http(code) }
-                    var parser = SSEByteParser(); var hello = false
-                    for try await byte in bytes {
-                        try Task.checkCancellation(); guard identity == credential else { return }
-                        guard let e = try parser.consume(byte), let data = e.data.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                    var hello = false
+                    // Social streaming remains active on every tab. Parse bytes
+                    // on the transport executor, as the chat stream does, so a
+                    // large event cannot monopolize typing and tab animations.
+                    try await SSETransport.read(bytes) { e in
+                        try Task.checkCancellation()
+                        guard self.identity == credential else { throw CancellationError() }
+                        guard let object = e.payload else { return }
                         let eventType = e.name == "message" ? object["type"] as? String ?? "message" : e.name
                         if eventType == "hello" {
                             let returned = field(object, "town_id", "being_id")
-                            guard object["anonymous"] as? Bool == false, object["token_kind"] as? String == "client", returned == credential.id || (!credential.id.hasPrefix("t_") && object["being_id"] as? String == credential.id) else { status = "身份校验失败，请重新配对"; return }
-                            hello = true; attempts = 0; status = "小镇已连接"; revision += 1; continue
+                            guard object["anonymous"] as? Bool == false, object["token_kind"] as? String == "client", returned == credential.id || (!credential.id.hasPrefix("t_") && object["being_id"] as? String == credential.id) else { throw SocialStreamError.identityMismatch }
+                            hello = true; attempts = 0; self.status = "小镇已连接"; self.revision += 1; return
                         }
                         guard hello else { throw PortalError.invalidResponse }
-                        let key = eventType + ":" + field(object, "fireside_id") + ":" + field(object, "id", "seq")
-                        let channel = ["dm": "mail", "bonfire": "bonfire", "fireside": "firesides"][eventType]
-                        if let channel, seen.insert(key).inserted { if seen.count > 5000 { seen = [key] }; if field(object, "sender_town_id", "town_id", "being_id") != credential.id { counts[channel, default: 0] += 1; CompletionNotifications.shared.social(channel: channel, title: ["mail":"收到新私信","firesides":"围炉有新消息","bonfire":"篝火有新消息"][channel] ?? "小镇有新消息", body: "打开 Being 查看最新内容") }; revision += 1 }
+                        if let channel = self.receive(eventType: eventType, object: object) {
+                            CompletionNotifications.shared.social(channel: channel, title: ["mail":"收到新私信","firesides":"围炉有新消息","bonfire":"篝火有新消息"][channel] ?? "小镇有新消息", body: "打开 Being 查看最新内容")
+                        }
                     }
                     throw PortalError.invalidResponse
-                } catch { if Task.isCancelled { return }; status = "连接中断，正在重连…"; attempts += 1; try? await Task.sleep(for: .seconds(min(30, 2 * attempts))) }
+                } catch SocialStreamError.identityMismatch { status = "身份校验失败，请重新配对"; return }
+                catch { if Task.isCancelled || identity != credential { return }; status = "连接中断，正在重连…"; attempts += 1; try? await Task.sleep(for: .seconds(min(30, 2 * attempts))) }
             }
         }
     }
 }
+
+private enum SocialStreamError: Error { case identityMismatch }
 
 extension Store {
     func pairingCode() async throws -> String {

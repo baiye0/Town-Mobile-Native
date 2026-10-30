@@ -49,7 +49,32 @@ enum Vault {
 
 @MainActor final class Store: ObservableObject {
     @Published var connection = Vault.load() { didSet { IOSPortalStore.shared.bind(connection); displayRevision += 1; sbsEnabled = nil; sbsActivity = ""; sbsError = nil; sbsRevision += 1 } }
-    @Published var conversations: [Conversation] = [] { didSet { displayRevision += 1 } }
+    private var storedConversations: [Conversation] = []
+    var conversations: [Conversation] {
+        get { storedConversations }
+        set {
+            objectWillChange.send()
+            storedConversations = newValue
+            displayRevision += 1
+            // Structural/history changes still invalidate the list. Live text
+            // uses projectConversation's row-only path instead.
+            var retainedMessages = Set<UUID>()
+            for room in newValue {
+                for message in room.messages {
+                    liveReplies[message.id]?.update(message)
+                    retainedMessages.insert(message.id)
+                }
+            }
+            liveReplies = liveReplies.filter { retainedMessages.contains($0.key) }
+        }
+    }
+    private var liveReplies: [UUID: LiveReplyState] = [:]
+    func liveReply(for message: Message) -> LiveReplyState {
+        if let state = liveReplies[message.id] { return state }
+        let state = LiveReplyState(message)
+        liveReplies[message.id] = state
+        return state
+    }
     @Published var selected: String? { didSet { displayRevision += 1; showSBS = UserDefaults.standard.bool(forKey: "scene.sbs.\(connection?.endpoint ?? "")|\(selected ?? "")") } }
     @Published var showAllScenes = false { didSet { displayRevision += 1; if let endpoint = connection?.endpoint { UserDefaults.standard.set(showAllScenes,forKey:"scene.all.\(endpoint)") } } }
     @Published var showSBS = false { didSet { displayRevision += 1 } }
@@ -67,37 +92,45 @@ enum Vault {
     private var cachedDisplay: [Message] = []
     var displayMessages: [Message] {
         let revision = displayRevision
-        if cachedRevision != revision { cachedDisplay = buildDisplayMessages().filter { !isMessageDeleted($0, endpoint: connection?.endpoint ?? "") && DeliveryRules.hasVisibleContent($0.text, hasAttachments: $0.files?.isEmpty == false) }; cachedRevision = revision }
+        if cachedRevision != revision {
+            cachedDisplay = buildDisplayMessages().filter { !isMessageDeleted($0, endpoint: connection?.endpoint ?? "") && DeliveryRules.hasVisibleContent($0.text, hasAttachments: $0.files?.isEmpty == false) }
+            let visibleIDs = Set(cachedDisplay.map(\.id))
+            liveReplies = liveReplies.filter { visibleIDs.contains($0.key) }
+            cachedRevision = revision
+        }
         return cachedDisplay
     }
     // Token-only edits do not change row identity or ordering. Patch the visible
     // snapshot instead of re-merging and sorting every historical row per frame.
     func projectConversation(_ room: Conversation, at index: Int) {
-        let old = conversations[index].messages
-        let cacheWasCurrent = cachedRevision == displayRevision
-        conversations[index] = room
-        guard cacheWasCurrent, old.count == room.messages.count else { return }
+        let old = storedConversations[index].messages
+        // Only an existing open reply's text can bypass the global publisher.
+        // Insertions, finalization and history metadata take the normal path.
         var updates: [UUID: Message] = [:]
-        for (before, after) in zip(old, room.messages) where before != after {
-            guard before.id == after.id, before.sequence == after.sequence,
-                  before.role == after.role, before.sceneLabel == after.sceneLabel,
-                  before.persistedText == after.persistedText,
-                  before.text == after.text || after.streaming == true,
-                  before.sceneID == after.sceneID, before.replyTo == after.replyTo,
-                  before.localAfter == after.localAfter, before.localBaseline == after.localBaseline,
-                  before.timestamp == after.timestamp, before.kind == after.kind,
-                  before.streaming == after.streaming,
-                  DeliveryRules.hasVisibleContent(before.text, hasAttachments: before.files?.isEmpty == false) ==
-                    DeliveryRules.hasVisibleContent(after.text, hasAttachments: after.files?.isEmpty == false) else { return }
-            updates[after.id] = after
+        if old.count == room.messages.count {
+            for (before, after) in zip(old, room.messages) where before != after {
+                var textOnly = before; textOnly.text = after.text
+                guard before.streaming == true, after.streaming == true,
+                      textOnly == after,
+                      DeliveryRules.hasVisibleContent(before.text, hasAttachments: before.files?.isEmpty == false) ==
+                        DeliveryRules.hasVisibleContent(after.text, hasAttachments: after.files?.isEmpty == false) else {
+                    // Whitespace-only replies have no row to update. Publish
+                    // the list when the first visible text arrives.
+                    conversations[index] = room; return
+                }
+                updates[after.id] = after
+            }
+        } else { conversations[index] = room; return }
+        let cacheWasCurrent = cachedRevision == displayRevision
+        storedConversations[index] = room
+        displayRevision += 1
+        if cacheWasCurrent {
+            for i in cachedDisplay.indices {
+                if let update = updates[cachedDisplay[i].id] { cachedDisplay[i].text = update.text }
+            }
+            cachedRevision = displayRevision
         }
-        for i in cachedDisplay.indices {
-            guard let update = updates[cachedDisplay[i].id] else { continue }
-            // A display-only history merge may already know the server sequence.
-            cachedDisplay[i].text = update.text; cachedDisplay[i].process = update.process
-            cachedDisplay[i].files = update.files; cachedDisplay[i].streaming = update.streaming
-        }
-        cachedRevision = displayRevision
+        for message in updates.values { liveReplies[message.id]?.update(message) }
     }
     private func buildDisplayMessages() -> [Message] {
         if showAllScenes { return HistoryRules.merge(conversations.filter { $0.endpoint == connection?.endpoint }.flatMap { room in room.messages.map { message in var m = message; if m.sceneID == nil { m.sceneID = room.id }; return m } }, timeline, activeIDs: activeMessageIDs) }
@@ -164,7 +197,21 @@ enum Vault {
     private var sceneAttachments: [String:[PendingAttachment]] = [:]
     @Published var busy = false
     @Published var activeScene: String?
-    @Published var outbox: [PendingSend] = [] { didSet { displayRevision += 1 } }
+    private var storedOutbox: [PendingSend] = []
+    var outbox: [PendingSend] {
+        get { storedOutbox }
+        set { objectWillChange.send(); storedOutbox = newValue; displayRevision += 1 }
+    }
+    func updateCheckpoint(_ entry: PendingSend) throws {
+        guard let index = storedOutbox.firstIndex(where: { $0.id == entry.id }) else { throw CancellationError() }
+        let old = storedOutbox[index]
+        // Reply/process/cursor are recovery data, not queue UI state. Persist
+        // them without rebuilding the shell or invalidating history ordering.
+        if old.phase != entry.phase || old.error != entry.error || old.files != entry.files ||
+            old.preparedText != entry.preparedText || old.text != entry.text {
+            outbox[index] = entry
+        } else { storedOutbox[index] = entry }
+    }
     @Published var outboxUnavailable = false
     @Published var submittedMessageID: UUID?
     @Published var streamingReplyID: UUID?
@@ -175,7 +222,11 @@ enum Vault {
     var activeSendID: String?
     @Published var connecting = false
     @Published var notice: String?
-    @Published var activity = ""
+    let runProgress = RunProgress()
+    var activity: String {
+        get { runProgress.activity }
+        set { if runProgress.activity != newValue { runProgress.activity = newValue } }
+    }
     @Published var sbsEnabled: Bool?
     @Published var sbsUpdating = false
     var sbsRevision = 0
@@ -188,11 +239,23 @@ enum Vault {
         configuration.timeoutIntervalForResource = 600
         return URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
     }()
-    private var file: URL { URL.documentsDirectory.appending(path: "conversations.json") }
+    private let file: URL
+    private(set) var conversationStorageUnavailable = false
     var current: Conversation? { conversations.first { $0.id == selected && $0.endpoint == connection?.endpoint } }
     var rooms: [Conversation] { (sceneDirectory[connection?.endpoint ?? ""] ?? []).compactMap { id in conversations.first { $0.id == id && $0.endpoint == connection?.endpoint } } }
-    init() {
-        if let data = try? Data(contentsOf: file) { conversations = (try? JSONDecoder().decode([Conversation].self, from: data)) ?? [] }
+    init(conversationFile: URL = URL.documentsDirectory.appending(path: "conversations.json")) {
+        file = conversationFile
+        do {
+            conversations = try JSONDecoder().decode([Conversation].self, from: Data(contentsOf: file))
+        } catch {
+            // Locked/unreadable or malformed storage is not an empty history.
+            // Keep the original file rather than overwriting it on the next
+            // refresh, send or worker completion.
+            if (error as? CocoaError)?.code != .fileReadNoSuchFile {
+                conversationStorageUnavailable = true
+                notice = "本地对话暂时无法读取，原记录已保留；请解锁设备后重新打开应用。"
+            }
+        }
         if let data = try? Data(contentsOf:historyFile) { cachedHistory = (try? JSONDecoder().decode([String:[Message]].self,from:data)) ?? [:] }
         timeline = cachedHistory[connection?.endpoint ?? ""] ?? []
         loadMessageDeletions()
@@ -204,6 +267,7 @@ enum Vault {
         for entry in visibleOutbox { project(entry) }
     }
     @discardableResult func persist() -> Bool {
+        guard !conversationStorageUnavailable else { return false }
         do { try JSONEncoder().encode(conversations).write(to: file, options: [.atomic, .completeFileProtection]); return true }
         catch { notice = "对话未能保存到设备，请检查存储空间。"; return false }
     }
@@ -248,17 +312,27 @@ enum Vault {
         if id == mainID { mainIDs[endpoint] = nil; ensureMain() }
         if selected == id { selected = mainID; intelligentUISelection = nil; intelligentUI = false }; saveDirectory(); persist()
     }
-    private func hydrateHistory(_ endpoint: String) {
+    func hydrateHistory(_ endpoint: String) {
+        var updated = conversations
+        var known = Set(updated.filter { $0.endpoint == endpoint }.map(\.id))
+        var confirmed: [String: [Message]] = [:]
         for message in timeline {
             guard let scene = message.sceneID else { continue }
-            if !conversations.contains(where: { $0.id == scene && $0.endpoint == endpoint }) { conversations.append(Conversation(id:scene,endpoint:endpoint,title:message.sceneLabel ?? scene)) }
+            confirmed[scene, default: []].append(message)
+            if known.insert(scene).inserted { updated.append(Conversation(id:scene,endpoint:endpoint,title:message.sceneLabel ?? scene)) }
         }
-        for i in conversations.indices where conversations[i].endpoint == endpoint {
-            let id = conversations[i].id
-            let confirmed = timeline.filter { $0.sceneID == id }
-            let local = conversations[i].messages.map { message in var m = message; if m.sceneID == nil { m.sceneID = id }; return m }
-            conversations[i].messages = HistoryRules.merge(local, confirmed, activeIDs: activeMessageIDs)
+        let active = activeMessageIDs
+        var changed = updated.count != conversations.count
+        for i in updated.indices where updated[i].endpoint == endpoint {
+            let id = updated[i].id
+            let local = updated[i].messages.map { message in var m = message; if m.sceneID == nil { m.sceneID = id }; return m }
+            let merged = HistoryRules.merge(local, confirmed[id] ?? [], activeIDs: active)
+            if updated[i].messages != merged { updated[i].messages = merged; changed = true }
         }
+        // Publish once for the complete merge, and not at all for an unchanged
+        // refresh. The setter reconciles every live row, so per-scene writes
+        // otherwise multiply work while a tab or keyboard is animating.
+        if changed { conversations = updated }
     }
     func history() async {
         guard !historyLoading, let c = connection else { return }
@@ -320,16 +394,19 @@ extension Store {
         guard let c = connection else { return }
         let revision = sbsRevision
         if let config = try? await json(c, "/api/llm/config"), connection == c, !Task.isCancelled,
-           revision == sbsRevision, !sbsUpdating, let enabled = config["sbs_enabled"] as? Bool { sbsEnabled = enabled }
+           revision == sbsRevision, !sbsUpdating, let enabled = config["sbs_enabled"] as? Bool, sbsEnabled != enabled { sbsEnabled = enabled }
         guard connection == c, !Task.isCancelled else { return }
         do {
             let (bytes, response) = try await session.data(for: request(c, "/api/stream/active"))
             guard connection == c, !Task.isCancelled else { return }
-            if (response as? HTTPURLResponse)?.statusCode == 204 { sbsActivity = "" }
+            if (response as? HTTPURLResponse)?.statusCode == 204 { if !sbsActivity.isEmpty { sbsActivity = "" } }
             else if (response as? HTTPURLResponse)?.statusCode == 200,
                     let snapshot = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-                    let status = HistoryRules.sbsStatus(snapshot) { sbsActivity = status }
-            if showSBS || showAllScenes { await history() }
+                    let status = HistoryRules.sbsStatus(snapshot), sbsActivity != status { sbsActivity = status }
+            // The active transport already owns the current turn. Defer
+            // automatic history merges while it runs so a background poll
+            // cannot stall a drag through older rows. Manual refresh stays live.
+            if (showSBS || showAllScenes) && !busy { await history() }
         } catch { /* Keep the last confirmed state; the foreground loop retries. */ }
     }
     func setSBSEnabled(_ enabled: Bool) async {

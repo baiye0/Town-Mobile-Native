@@ -10,6 +10,7 @@ final class LocalHistoryServer {
     private let lock = NSLock()
     private var count = 60
     private var stream: NWConnection?
+    private var thinkingTimer: DispatchSourceTimer?
     private var chatRows: [[String: Any]] = []
     private var chatScene = ""
     private var chatEnabled = false
@@ -29,7 +30,8 @@ final class LocalHistoryServer {
     private var historyReceived: XCTestExpectation?
     var endpoint: String { "http://127.0.0.1:\(listener.port!.rawValue)/compat" }
 
-    init(ready: XCTestExpectation) throws {
+    init(ready: XCTestExpectation, historyCount: Int = 60) throws {
+        count = historyCount
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -69,6 +71,18 @@ final class LocalHistoryServer {
         queue.async { self.emit(type, fields) }
     }
 
+    func startThinkingFlood() {
+        queue.async {
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            timer.schedule(deadline: .now(), repeating: .milliseconds(5))
+            timer.setEventHandler { [weak self] in
+                self?.emit("reasoning", ["delta": "持续检查上下文和工具结果。"])
+            }
+            self.thinkingTimer = timer; timer.resume()
+        }
+    }
+    func stopThinkingFlood() { queue.sync { thinkingTimer?.cancel(); thinkingTimer = nil } }
+
     func appendReply(_ text: String) {
         queue.async { self.replyText += text; self.emit("content_block_delta", ["delta": ["text": text]]) }
     }
@@ -76,7 +90,7 @@ final class LocalHistoryServer {
     func publishHistoryAhead(_ text: String) {
         queue.async {
             self.lock.lock(); defer { self.lock.unlock() }
-            let sequence = 61 + self.chatRows.count
+            let sequence = self.count + 1 + self.chatRows.count
             self.aheadReplySequence = sequence
             self.chatRows.append(["seq": sequence, "role": "assistant", "scene_id": self.chatScene, "content": text])
         }
@@ -104,12 +118,12 @@ final class LocalHistoryServer {
         }
     }
 
-    func stop() { queue.async { self.stream?.cancel(); self.stream = nil }; listener.cancel() }
+    func stop() { queue.async { self.thinkingTimer?.cancel(); self.thinkingTimer = nil; self.stream?.cancel(); self.stream = nil }; listener.cancel() }
 
     private func persistReply() {
         guard !replyText.isEmpty else { return }
         lock.lock()
-        let sequence = aheadReplySequence ?? (61 + chatRows.count)
+        let sequence = aheadReplySequence ?? (count + 1 + chatRows.count)
         let row: [String: Any] = ["seq": sequence, "role": "assistant", "scene_id": chatScene, "content": replyText]
         if let i = chatRows.firstIndex(where: { $0["seq"] as? Int == sequence }) { chatRows[i] = row }
         else { chatRows.append(row) }
@@ -142,7 +156,7 @@ final class LocalHistoryServer {
         sent.append(prompt)
         let failure = chatFailures.isEmpty ? nil : chatFailures.removeFirst()
         if failure == nil || failure?.persistUser == true {
-            chatRows.append(["seq": 61 + chatRows.count, "role": "user", "scene_id": chatScene, "content": prompt])
+            chatRows.append(["seq": count + 1 + chatRows.count, "role": "user", "scene_id": chatScene, "content": prompt])
         }
         lock.unlock()
         if let failure {
@@ -238,8 +252,14 @@ final class LocalHistoryServer {
             historyReceived = nil
             lock.unlock()
             payload["messages"] = (1...count).map { index in
-                ["seq": index, "role": "assistant", "scene_id": "fixture",
-                 "content": String(format: "Compatibility message %03d", index)] as [String: Any]
+                var content = String(format: "Compatibility message %03d", index)
+                if count > 60 {
+                    content += "\n\n**历史消息**：这里保留上下文、段落和阅读位置。\n\n- 第一项检查\n- 第二项检查"
+                    if index % 5 == 0 { content += "\n\n```swift\nlet title = \"历史记录\"\n" + String(repeating: "let value = 42\n", count: 8) + "```" }
+                }
+                var row: [String: Any] = ["seq": index, "role": "assistant", "scene_id": "fixture", "content": content]
+                if count > 60 { row["at"] = String(format: "2026-10-25T%02d:%02d:00Z", (index / 60) % 24, index % 60) }
+                return row
             }
             payload["messages"] = (payload["messages"] as! [[String: Any]]) + rows
             received?.fulfill()

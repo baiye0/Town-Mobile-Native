@@ -18,6 +18,10 @@ extension Store {
     }
     func saveOutbox() throws { try OutboxCheckpoint.save(outbox, to: outboxFile) }
     func send(interrupt: Bool = false) {
+        guard !conversationStorageUnavailable else {
+            notice = "本地对话暂时无法读取，草稿和原记录已保留；请重新打开应用后重试。"
+            return
+        }
         guard !outboxUnavailable, let c = connection else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !attachments.isEmpty else { return }
@@ -78,6 +82,7 @@ extension Store {
     private func retryUnconfirmed(_ id: String) {
         guard worker == nil, !busy, let c = connection,
               let initial = outbox.first(where: { $0.id == id && $0.endpoint == c.endpoint && $0.phase == "unknown" }) else { return }
+        runProgress.process = initial.process
         busy = true; activeScene = initial.sceneID; activeSendID = id; activity = "正在核对发送结果"
         worker = Task {
             var resumeConfirmed = false
@@ -127,7 +132,7 @@ extension Store {
         startDelivery(recover: true)
     }
     func startDelivery(recover: Bool = false) {
-        guard !outboxUnavailable, !messageDeletionsUnavailable, worker == nil, !busy, let c = connection else { return }
+        guard !conversationStorageUnavailable, !outboxUnavailable, !messageDeletionsUnavailable, worker == nil, !busy, let c = connection else { return }
         // Failed, stopped and unresolved sends are not automatic retry candidates.
         // Leave them actionable on their own bubbles without blocking newer messages.
         let endpointItems = outbox.enumerated().filter { $0.element.endpoint == c.endpoint }
@@ -138,16 +143,22 @@ extension Store {
         let first = endpointItems[head].element
         guard !isMessageDeleted(Message(id: first.userID, role: "user", text: first.preparedText ?? first.text, sceneID: first.sceneID), endpoint: c.endpoint) else { return }
         guard ["queued", "preparing"].contains(first.phase) || recover && ["sending", "waiting", "unknown"].contains(first.phase) else { return }
+        runProgress.process = first.process
         busy = true; activeScene = first.sceneID; activeSendID = first.id
+        #if DEBUG
+        ChatPerformanceProbe.shared.start(self)
+        #endif
         worker = Task {
             var safeToContinue = false
+            #if DEBUG
+            defer { ChatPerformanceProbe.shared.stop() }
+            #endif
             // Continue draining newer messages without automatically retrying failures.
             defer { busy = false; activeScene = nil; activeSendID = nil; streamID = nil; streamingReplyID = nil; activity = ""; worker = nil; persist(); startDelivery() }
             guard let index = outbox.firstIndex(where: { $0.id == first.id }) else { return }
             var entry = outbox[index]
             @MainActor func checkpoint(background: Bool = false) throws {
-                guard let i = outbox.firstIndex(where: { $0.id == entry.id }) else { throw CancellationError() }
-                outbox[i] = entry
+                try updateCheckpoint(entry)
                 if background {
                     OutboxCheckpoint.schedule(outbox, to: outboxFile) { [weak self] in
                         Task { @MainActor in self?.notice = "回复恢复状态未能保存，请检查设备存储空间。" }
@@ -184,8 +195,9 @@ extension Store {
                             }
                             guard http.value(forHTTPHeaderField: "Content-Type")?.contains("text/event-stream") == true else { throw PortalError.invalidResponse }
                             var completed = false
-                            let presentation = StreamPresentation { [weak self] in self?.project($0) }
-                            defer { presentation.flush() }
+                            let presentation = StreamPresentation(publish: { [weak self] in self?.project($0, live: true) },
+                                                                  publishProgress: { [weak self] in self?.runProgress.process = $0.process })
+                            defer { presentation.flush(); project(entry) }
                             var lastSaved = Date.distantPast
                             @MainActor func handle(_ event: SSEEvent) throws {
                                 if event.data == "[DONE]" { completed = true; return }
@@ -198,7 +210,7 @@ extension Store {
                                 // message_stop closes one reply bubble, not the
                                 // whole turn. EOF/[DONE] is the turn boundary.
                                 else if ["text", "content_block_delta", "tool_use", "thinking", "reasoning"].contains(type) { completed = false }
-                                presentation.submit(entry)
+                                presentation.submit(entry, progressOnly: isHighFrequencyProgress(type, value: value))
                             }
                             try await SSETransport.read(bytes) { event in
                                 try handle(event)
@@ -247,13 +259,17 @@ extension Store {
             }
         }
     }
-    func project(_ entry: PendingSend) {
+    func project(_ entry: PendingSend, live: Bool = false) {
         guard let i = conversations.firstIndex(where: { $0.id == entry.sceneID && $0.endpoint == entry.endpoint }) else { return }
+        // Live reasoning belongs to its own observed view, not the entire
+        // conversation list. Commit it to the message at transport boundaries.
+        if live || activeSendID == entry.id, runProgress.process != entry.process { runProgress.process = entry.process }
         var room = conversations[i]
+        let process = live ? room.messages.first(where: { $0.id == entry.userID })?.process ?? "" : entry.process
         var changed = false
         let rows = [
             Message(id: entry.userID, role: "user", text: entry.preparedText ?? entry.text,
-                    sceneID: entry.sceneID, timestamp: entry.createdAt, files: entry.files, process: entry.process,
+                    sceneID: entry.sceneID, timestamp: entry.createdAt, files: entry.files, process: process,
                     localBaseline: entry.baseline, localAfter: entry.afterID)
         ] + ReplyStream.messages(entry)
         for message in rows {
@@ -263,12 +279,22 @@ extension Store {
                     var updated = message
                     updated.sequence = message.sequence ?? room.messages[j].sequence
                     updated.persistedText = room.messages[j].persistedText
+                    // A replay/recovery frame may carry metadata before its
+                    // text. Keep the already rendered reply until a non-empty
+                    // frame arrives, so a transient empty snapshot cannot
+                    // clear the conversation bubble.
+                    if message.role == "being", message.text.isEmpty, !room.messages[j].text.isEmpty {
+                        updated.text = room.messages[j].text
+                        updated.streaming = room.messages[j].streaming ?? message.streaming
+                    }
                     // A text-matched history echo can be an early snapshot.
                     // Only explicit stream persistence metadata makes it final.
                     if message.sequence == nil, message.text != room.messages[j].text {
                         updated.persistedText = nil
                     }
-                    if updated.streaming == false, let authoritative = updated.persistedText { updated.text = authoritative }
+                    if updated.streaming == false, let authoritative = updated.persistedText {
+                        updated.text = HistoryRules.replyText(authoritative, preserving: updated.text)
+                    }
                     if room.messages[j] != updated { room.messages[j] = updated; changed = true }
                 } else if message.role == "user", room.messages[j].process != message.process {
                     // History can acknowledge the user while its run is still
@@ -286,6 +312,7 @@ extension Store {
                 confirmed.replyTo = message.replyTo
                 confirmed.process = message.process
                 confirmed.streaming = message.streaming
+                confirmed.text = HistoryRules.replyText(confirmed.text, preserving: message.text)
                 if message.streaming == true {
                     confirmed.persistedText = confirmed.text
                     confirmed.text = message.text
@@ -303,8 +330,17 @@ extension Store {
     private func updateActivity(_ value: String) {
         if activity != value { activity = value }
     }
+    private func isHighFrequencyProgress(_ type: String, value: [String: Any]) -> Bool {
+        if ["thinking", "reasoning", "tool_use", "tool_result"].contains(type) { return true }
+        guard type == "content_block_delta", let delta = value["delta"] as? [String: Any] else { return false }
+        return delta["thinking"] is String && !(delta["thinking"] as? String ?? "").isEmpty
+    }
     func consume(_ type: String, _ value: [String: Any], entry: inout PendingSend) throws {
-        if value["scene_id"] is NSNull { sbsActivity = ["message_stop","done","end"].contains(type) ? "" : "正在自主活动"; return }
+        if value["scene_id"] is NSNull {
+            let status = ["message_stop", "done", "end"].contains(type) ? "" : "正在自主活动"
+            if sbsActivity != status { sbsActivity = status }
+            return
+        }
         if let scene = value["scene_id"] as? String, scene != entry.sceneID { return }
         if let id = value["stream_id"] as? String { entry.streamID = id; streamID = id }
         ReplyStream.consume(type, value, entry: &entry)
@@ -324,11 +360,15 @@ extension Store {
         case "error": throw PortalError.server("Being 返回错误")
         default: break
         }
-        if entry.process.count > 64000 {
+        // UTF-8 length avoids traversing every grapheme on every reasoning
+        // token. Truncate only when the bounded process buffer actually fills.
+        if entry.process.utf8.count > 256000 {
             entry.process = String(entry.process.suffix(64000))
         }
     }
     func recover(_ entry: inout PendingSend, connection c: Connection) async throws -> Bool {
+        // Commit process details even when recovery exits without a final reply.
+        defer { project(entry) }
         activity = "正在恢复回复"
         var idleSince = Date()
         var interval = 0.5
@@ -357,8 +397,11 @@ extension Store {
                         try consume(type, value, entry: &entry); entry.cursor = seq
                         receivedEvents = true
                     }
-                    project(entry)
-                    if let i = outbox.firstIndex(where: { $0.id == entry.id }) { outbox[i] = entry; try saveOutbox() }
+                    project(entry, live: true)
+                    try updateCheckpoint(entry)
+                    OutboxCheckpoint.schedule(outbox, to: outboxFile) { [weak self] in
+                        Task { @MainActor in self?.notice = "回复恢复状态未能保存，请检查设备存储空间。" }
+                    }
                     if data["finished"] as? Bool == true { return try await reconcile(&entry, connection: c) }
                 }
                 failures = 0

@@ -13,7 +13,13 @@ struct StreamReply: Codable, Equatable, Identifiable, Sendable {
 /// message_stop ends that bubble, while only transport completion ends the turn.
 enum ReplyStream {
     static func consume(_ type: String, _ value: [String: Any], entry: inout PendingSend) {
-        var bubbles = entry.bubbles ?? (entry.reply.isEmpty ? [] : [StreamReply(id: entry.replyID, text: entry.reply)])
+        // An incomplete checkpoint can contain the flattened reply while `bubbles`
+        // is present but empty. Treat that state as one live bubble instead of
+        // allowing the next progress frame to erase text already received.
+        var bubbles = entry.bubbles ?? []
+        if bubbles.isEmpty, !entry.reply.isEmpty {
+            bubbles = [StreamReply(id: entry.replyID, text: entry.reply)]
+        }
         let delta = value["delta"] as? [String: Any]
         let text: String?
         switch type {
@@ -31,6 +37,7 @@ enum ReplyStream {
             bubbles[i].text += separator + text
             bubbles[i].paragraphBreak = false
             bubbles[i].interim = false
+            entry.reply = bubbles.map(\.text).joined(separator: "\n\n")
         } else if !bubbles.isEmpty {
             let i = bubbles.count - 1
             switch type {
@@ -62,7 +69,6 @@ enum ReplyStream {
             }
         }
         entry.bubbles = bubbles
-        entry.reply = bubbles.map(\.text).joined(separator: "\n\n")
     }
 
     static func finish(_ entry: inout PendingSend) {
@@ -96,7 +102,10 @@ enum ReplyStream {
     }
 
     static func messages(_ entry: PendingSend) -> [Message] {
-        let bubbles = entry.bubbles ?? [StreamReply(id: entry.replyID, text: entry.reply)]
+        var bubbles = entry.bubbles ?? []
+        if bubbles.isEmpty, !entry.reply.isEmpty {
+            bubbles = [StreamReply(id: entry.replyID, text: entry.reply)]
+        }
         return bubbles.enumerated().map { index, bubble in
             Message(id: bubble.id, role: "being", text: bubble.text, sceneID: entry.sceneID,
                     sequence: bubble.sequence, timestamp: entry.createdAt,
@@ -118,8 +127,15 @@ enum ReplyStream {
             let available = replies.filter { !used.contains($0.id) }
             let match = available.first { $0.sequence != nil && $0.sequence == row.sequence }
                 ?? available.first { $0.sequence == nil && $0.text == row.text }
-                ?? (index == confirmed.count - 1 ? available.last(where: { $0.sequence == nil }) : nil)
-            if let match { row.id = match.id; used.insert(match.id) }
+                ?? (index == confirmed.count - 1 ? available.last(where: {
+                    $0.sequence == nil && !$0.text.isEmpty && !row.text.isEmpty &&
+                    (row.text.hasPrefix($0.text) || $0.text.hasPrefix(row.text))
+                }) : nil)
+            if let match {
+                row.id = match.id
+                row.text = HistoryRules.replyText(row.text, preserving: match.text)
+                used.insert(match.id)
+            }
             row.streaming = false
             row.replyTo = entry.userID
             return row

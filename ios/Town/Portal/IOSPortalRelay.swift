@@ -87,6 +87,7 @@ extension IOSPortalStore {
                 }
                 guard self.generation == epoch else { break }
                 self.calls.values.forEach { $0.cancel() }; self.calls.removeAll()
+                self.interruptActivities()
                 self.socket?.cancel(with: .goingAway, reason: nil)
                 self.session?.invalidateAndCancel()
                 guard self.generation == epoch, self.wanted, !Task.isCancelled else { break }
@@ -98,12 +99,12 @@ extension IOSPortalStore {
             }
         }
     }
-    static func send(_ value: [String: Any], to socket: URLSessionWebSocketTask) async throws {
+    nonisolated static func send(_ value: [String: Any], to socket: URLSessionWebSocketTask) async throws {
         let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
         guard data.count <= 1024 * 1024, let string = String(data: data, encoding: .utf8) else { throw PortalError.invalidResponse }
         try await socket.send(.string(string))
     }
-    static func receive(_ socket: URLSessionWebSocketTask) async throws -> [String: Any] {
+    nonisolated static func receive(_ socket: URLSessionWebSocketTask) async throws -> [String: Any] {
         let message = try await socket.receive()
         let data: Data
         switch message { case .string(let text): data = Data(text.utf8); case .data(let bytes): data = bytes; @unknown default: throw PortalError.invalidResponse }

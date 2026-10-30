@@ -33,11 +33,23 @@ public enum HistoryRules {
 
 // Retain locally known sequence rows when the server only returns a partial page.
 extension HistoryRules {
+    // Streamed replies only grow. A shorter prefix is a stale persistence
+    // snapshot; a genuinely different canonical response can still replace it.
+    static func replyText(_ incoming: String, preserving received: String) -> String {
+        incoming.isEmpty || received.hasPrefix(incoming) ? received : incoming
+    }
+
     static func merge(_ local: [Message], _ confirmed: [Message], activeIDs: Set<UUID> = []) -> [Message] {
         var indexed = Dictionary(local.compactMap { m in m.sequence.map { ($0,m) } }, uniquingKeysWith: { _,new in new })
         for var message in confirmed {
             guard let seq = message.sequence else { continue }
             if let local = indexed[seq] {
+                // A history poll can briefly expose an empty placeholder while
+                // the stream is still being persisted. Never replace text the
+                // client has already received with that placeholder.
+                if message.role == "being", message.text.isEmpty || local.replyTo != nil || local.streaming != nil {
+                    message.text = replyText(message.text, preserving: local.text)
+                }
                 message.id = local.id
                 message.files = message.files ?? local.files
                 message.process = message.process ?? local.process

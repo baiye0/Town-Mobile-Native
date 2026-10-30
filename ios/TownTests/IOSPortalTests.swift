@@ -79,13 +79,14 @@ import HealthKit
     }
     func testOwnershipAndCorruptPolicyFailClosed() throws {
         try portal.workspace?.write("private.txt", data: Data("alice".utf8))
-        portal.configure { $0.grants.insert("calendar.read") }
+        // Ownership persistence is independent of simulator system grants.
+        portal.configure { $0.grants.insert("health.steps.read") }
         portal.bind(try Connection("https://example.invalid/bob?token=synthetic"))
         XCTAssertTrue(portal.options.grants.isEmpty)
         XCTAssertThrowsError(try portal.workspace?.read("private.txt"))
         portal.bind(try Connection("https://example.invalid/alice?token=rotated"))
         XCTAssertEqual(try portal.workspace?.read("private.txt"), Data("alice".utf8))
-        XCTAssertTrue(portal.options.grants.contains("calendar.read"))
+        XCTAssertTrue(portal.options.grants.contains("health.steps.read"))
         let owner = LocalPortalRules.owner(try XCTUnwrap(portal.connection))
         try Data("corrupt".utf8).write(to: home.appendingPathComponent(owner).appendingPathComponent("options.json"))
         let restored = IOSPortalStore(base: home); restored.bind(portal.connection)
@@ -93,6 +94,53 @@ import HealthKit
         XCTAssertFalse(restored.running)
         XCTAssertNil(restored.workspace)
         XCTAssertNotNil(restored.notice)
+    }
+    func testActivityTracksReadsFailuresWithoutPollingNoiseAndIsBounded() async throws {
+        _ = await rpc("portal_file_read", ["path": "missing.txt"])
+        XCTAssertEqual(portal.activity.first?.status, "失败")
+        _ = await rpc("portal_ios_activity")
+        _ = await rpc("portal_status")
+        XCTAssertEqual(portal.activity.count, 1)
+        for _ in 0..<105 { portal.record("portal_file_read", "已完成") }
+        XCTAssertEqual(portal.activity.count, 100)
+        await portal.flushActivity()
+        let owner = LocalPortalRules.owner(try XCTUnwrap(portal.connection))
+        let data = try Data(contentsOf: home.appendingPathComponent(owner).appendingPathComponent("activity.json"))
+        let records = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+        XCTAssertEqual(records.count, 100)
+        XCTAssertEqual(Set(records[0].keys), ["id", "time", "tool", "status"])
+    }
+    func testImmediateOwnerSwitchRetainsActivityBeforeDiskFlush() throws {
+        let alice = try XCTUnwrap(portal.connection)
+        portal.record("portal_file_read", "已完成")
+        let id = portal.activity.first?.id
+        portal.bind(try Connection("https://example.invalid/bob?token=synthetic"))
+        XCTAssertTrue(portal.activity.isEmpty)
+        portal.bind(alice)
+        XCTAssertEqual(portal.activity.first?.id, id)
+    }
+    func testResumeRepairsStaleAndRetryingSessionsWithoutRestartingManualStop() {
+        portal.start()
+        portal.setPhase("retrying")
+        var epoch = portal.generation
+        portal.resume()
+        XCTAssertNotEqual(portal.generation, epoch)
+        XCTAssertEqual(portal.phase, "connecting")
+        portal.setPhase("connected")
+        portal.lastSeen = Date().addingTimeInterval(-100)
+        epoch = portal.generation
+        portal.resume()
+        XCTAssertNotEqual(portal.generation, epoch)
+        portal.suspend()
+        XCTAssertTrue(portal.running)
+        portal.resume()
+        XCTAssertEqual(portal.phase, "connecting")
+        portal.stop()
+        epoch = portal.generation
+        portal.resume()
+        XCTAssertEqual(portal.generation, epoch)
+        XCTAssertFalse(portal.running)
+        XCTAssertEqual(portal.phase, "stopped")
     }
     func testPermissionPersistenceFailureStopsAccess() async throws {
         portal.configure { $0.grants.insert("calendar.read") }
@@ -129,21 +177,17 @@ import HealthKit
         try JSONEncoder().encode([action]).write(to: home.appendingPathComponent(owner).appendingPathComponent("actions.json"))
         let restored = IOSPortalStore(base: home); restored.bind(portal.connection)
         XCTAssertEqual(restored.actions.first?.state, "unknown")
-        restored.decide("one", approve: true)
         XCTAssertEqual(restored.actions.first?.state, "unknown")
     }
-    func testNativeCalendarConfirmationDedupAndDeletion() async throws {
+    func testNativeCalendarImmediateDedupAndDeletion() async throws {
         try requireNativeSimulator()
         guard portal.native.available("calendar") else { throw XCTSkip("Requires calendar grant on an isolated simulator") }
         portal.configure { $0.grants.formUnion(["calendar.read", "calendar.write"]) }
         let title = "Portal synthetic " + UUID().uuidString
         let start = Date().addingTimeInterval(3600), end = start.addingTimeInterval(1800)
         let args: [String: Any] = ["action": "create", "request_id": "calendar-create", "title": title, "start": start.ISO8601Format(), "end": end.ISO8601Format()]
-        let queued = try portal.enqueue("portal_ios_calendar", args: args)
-        XCTAssertEqual(queued["status"] as? String, "pending")
-        let before = try await portal.native.read("calendar", ["action": "list", "start": start.addingTimeInterval(-60).ISO8601Format(), "end": end.addingTimeInterval(60).ISO8601Format(), "query": title])
-        XCTAssertTrue((before["events"] as? [[String: Any]])?.isEmpty == true)
-        portal.decide("calendar-create", approve: true)
+        let created = try portal.enqueue("portal_ios_calendar", args: args)
+        XCTAssertEqual(created["status"] as? String, "completed")
         XCTAssertEqual(portal.actions.first?.state, "completed", portal.notice ?? "")
         let resultData = try XCTUnwrap(portal.actions.first?.result)
         let record = try JSONSerialization.jsonObject(with: resultData) as! [String: Any]
@@ -153,38 +197,33 @@ import HealthKit
         XCTAssertEqual(portal.actions.count, 1)
         var conflict = args; conflict["title"] = "different"
         XCTAssertThrowsError(try portal.enqueue("portal_ios_calendar", args: conflict))
-        _ = try portal.enqueue("portal_ios_calendar", args: ["action": "update", "id": id, "request_id": "calendar-stale", "title": "Outdated request", "start": start.ISO8601Format(), "end": end.ISO8601Format()])
-        let changed = try XCTUnwrap(portal.native.events.event(withIdentifier: id))
-        changed.title = "Changed after preview"
-        try portal.native.events.save(changed, span: .thisEvent, commit: true)
-        portal.decide("calendar-stale", approve: true)
-        XCTAssertEqual(portal.actions.last?.state, "stale")
-        XCTAssertEqual(portal.native.events.event(withIdentifier: id)?.title, "Changed after preview")
+        let updated = try portal.enqueue("portal_ios_calendar", args: ["action": "update", "id": id, "request_id": "calendar-update", "title": "Updated request", "start": start.ISO8601Format(), "end": end.ISO8601Format()])
+        XCTAssertEqual(updated["status"] as? String, "completed")
+        XCTAssertEqual(portal.native.events.event(withIdentifier: id)?.title, "Updated request")
         let delete: [String: Any] = ["action": "delete", "id": id, "request_id": "calendar-delete"]
-        _ = try portal.enqueue("portal_ios_calendar", args: delete)
-        XCTAssertNotNil(portal.native.events.event(withIdentifier: id))
-        portal.decide("calendar-delete", approve: true)
+        let deleted = try portal.enqueue("portal_ios_calendar", args: delete)
+        XCTAssertEqual(deleted["status"] as? String, "completed")
         XCTAssertNil(portal.native.events.event(withIdentifier: id))
         XCTAssertEqual(portal.actions.last?.state, "completed")
     }
-    func testNativeContactsConfirmationAndRevocation() throws {
+    func testNativeContactsImmediateAndRevocation() throws {
         try requireNativeSimulator()
         guard portal.native.available("contacts") else { throw XCTSkip("Requires contacts grant on an isolated simulator") }
         portal.configure { $0.grants.formUnion(["contacts.read", "contacts.write"]) }
         let name = "Portal synthetic " + UUID().uuidString
         let args: [String: Any] = ["action": "create", "request_id": "contact-create", "given_name": name, "phones": ["5550100"]]
-        _ = try portal.enqueue("portal_ios_contacts", args: args)
-        portal.decide("contact-create", approve: true)
+        let created = try portal.enqueue("portal_ios_contacts", args: args)
+        XCTAssertEqual(created["status"] as? String, "completed")
         XCTAssertEqual(portal.actions.first?.state, "completed", portal.notice ?? "")
         let record = try JSONSerialization.jsonObject(with: XCTUnwrap(portal.actions.first?.result)) as! [String: Any]
         let id = try XCTUnwrap(record["id"] as? String)
         defer { _ = try? portal.native.write("contacts", ["action": "delete", "id": id]) }
-        _ = try portal.enqueue("portal_ios_contacts", args: ["action": "update", "id": id, "request_id": "contact-update", "given_name": "Updated synthetic", "phones": ["5550101"]])
+        let updated = try portal.enqueue("portal_ios_contacts", args: ["action": "update", "id": id, "request_id": "contact-update", "given_name": "Updated synthetic", "phones": ["5550101"]])
+        XCTAssertEqual(updated["status"] as? String, "completed")
         portal.configure { $0.grants.remove("contacts.write") }
-        portal.decide("contact-update", approve: true)
-        XCTAssertEqual(portal.actions.last?.state, "cancelled")
+        XCTAssertThrowsError(try portal.enqueue("portal_ios_contacts", args: ["action": "update", "id": id, "request_id": "contact-revoked", "given_name": "Should not apply"]))
         let contact = try portal.native.contacts.unifiedContact(withIdentifier: id, keysToFetch: [CNContactGivenNameKey as CNKeyDescriptor])
-        XCTAssertEqual(contact.givenName, name)
+        XCTAssertEqual(contact.givenName, "Updated synthetic")
     }
     func testLocationReturnsFreshCoordinatesAndAccuracy() async throws {
         try requireNativeSimulator()
@@ -196,21 +235,21 @@ import HealthKit
         XCTAssertGreaterThanOrEqual(try XCTUnwrap(value["accuracy_m"] as? Double), 0)
         XCTAssertNotNil(value["timestamp"])
     }
-    func testNativeReminderConfirmationAndCompletion() throws {
+    func testNativeReminderImmediateAndCompletion() throws {
         try requireNativeSimulator()
         guard portal.native.available("reminders") else { throw XCTSkip("Requires reminders grant on an isolated simulator") }
         portal.configure { $0.grants.formUnion(["reminders.read", "reminders.write"]) }
-        _ = try portal.enqueue("portal_ios_reminders", args: ["action": "create", "request_id": "reminder-create", "title": "Portal synthetic " + UUID().uuidString, "due": Date().addingTimeInterval(86400).ISO8601Format()])
-        portal.decide("reminder-create", approve: true)
+        let created = try portal.enqueue("portal_ios_reminders", args: ["action": "create", "request_id": "reminder-create", "title": "Portal synthetic " + UUID().uuidString, "due": Date().addingTimeInterval(86400).ISO8601Format()])
+        XCTAssertEqual(created["status"] as? String, "completed")
         XCTAssertEqual(portal.actions.first?.state, "completed", portal.notice ?? "")
         let record = try JSONSerialization.jsonObject(with: XCTUnwrap(portal.actions.first?.result)) as! [String: Any]
         let id = try XCTUnwrap(record["id"] as? String)
         defer { if let reminder = portal.native.events.calendarItem(withIdentifier: id) as? EKReminder { try? portal.native.events.remove(reminder, commit: true) } }
-        _ = try portal.enqueue("portal_ios_reminders", args: ["action": "update", "id": id, "request_id": "reminder-complete", "completed": true])
-        portal.decide("reminder-complete", approve: true)
+        let completed = try portal.enqueue("portal_ios_reminders", args: ["action": "update", "id": id, "request_id": "reminder-complete", "completed": true])
+        XCTAssertEqual(completed["status"] as? String, "completed")
         XCTAssertEqual((portal.native.events.calendarItem(withIdentifier: id) as? EKReminder)?.isCompleted, true)
-        _ = try portal.enqueue("portal_ios_reminders", args: ["action": "delete", "id": id, "request_id": "reminder-delete"])
-        portal.decide("reminder-delete", approve: true)
+        let deleted = try portal.enqueue("portal_ios_reminders", args: ["action": "delete", "id": id, "request_id": "reminder-delete"])
+        XCTAssertEqual(deleted["status"] as? String, "completed")
         XCTAssertNil(portal.native.events.calendarItem(withIdentifier: id))
     }
     func testRealWebSocketHandshakeMCPAndBackgroundResume() async throws {

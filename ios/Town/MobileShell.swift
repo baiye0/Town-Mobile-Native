@@ -54,8 +54,6 @@ struct MobileShell: View {
                                             .overlay(alignment: .topTrailing) {
                                                 if let item, social.unread(item) > 0 { Circle().fill(.red).frame(width: 7, height: 7).padding(3) }
                                             }
-                                        Text(item?.title ?? "更多").font(.caption2)
-                                            .lineLimit(1).minimumScaleFactor(0.8)
                                     }.foregroundStyle(nav.selected == id ? ClientTheme.text : ClientTheme.secondary)
                                         .frame(maxWidth: .infinity).frame(minHeight: 48)
                                 }.buttonStyle(.plain).accessibilityLabel(item?.title ?? "更多")
@@ -110,8 +108,14 @@ struct MobileShell: View {
         .task { IOSPortalStore.shared.bind(store.connection); social.startLive(); store.resumeDelivery(); CompletionNotifications.shared.openScene = { endpoint, scene in if store.connection?.endpoint == endpoint { store.selectScene(scene); nav.selected = "chat" } }; if let (endpoint, scene) = CompletionNotifications.shared.pending { CompletionNotifications.shared.openScene?(endpoint, scene); CompletionNotifications.shared.pending = nil } }
         .onChange(of: nav.selected) { value in store.chatVisible = value == "chat" }
         .onChange(of: nav.sidebar) { opened in if !opened { sidebarSearchFocused = false } }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in IOSPortalStore.shared.suspend() }
-        .onChange(of: phase) { phase in if phase == .active { IOSPortalStore.shared.resume() }; store.appActive = phase == .active; if phase == .active { social.startLive(); store.resumeDelivery() } else { social.stopLive() } }
+        .onChange(of: phase) { phase in
+            // Use the scene lifecycle for both edges. UIApplication background
+            // notifications are not a reliable pair with a SwiftUI scene phase.
+            if phase == .background { IOSPortalStore.shared.suspend() }
+            if phase == .active { IOSPortalStore.shared.resume() }
+            store.appActive = phase == .active
+            if phase == .active { social.startLive(); store.resumeDelivery() } else { social.stopLive() }
+        }
         .alert("删除场景？", isPresented: Binding(get: { deletingID != nil },set: { if !$0 { deletingID = nil } })) {
             Button("取消",role:.cancel) { deletingID = nil }
             Button("确认删除",role:.destructive) { if let id = deletingID { store.delete(id) }; deletingID = nil }
@@ -126,22 +130,22 @@ struct MobileShell: View {
         if #available(iOS 18.0, *) {
             TabView(selection: $nav.selected) {
                 ForEach(nav.tabs) { item in
-                    Tab(value: item.rawValue) { destination(item).toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Label(item.title, systemImage: item.icon) }.badge(social.unread(item))
+                    Tab(value: item.rawValue) { destination(item).toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Image(systemName: item.icon).accessibilityLabel(item.title) }.badge(social.unread(item))
                 }
-                Tab(value: "more") { MoreView().toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Label("更多", systemImage: "square.grid.2x2") }
+                Tab(value: "more") { MoreView().toolbar(glass ? .automatic : .hidden, for: .tabBar) } label: { Image(systemName: "square.grid.2x2").accessibilityLabel("更多") }
             }
         } else {
             TabView(selection: $nav.selected) {
                 ForEach(nav.tabs) { item in
                     destination(item)
                         .toolbar(glass ? .automatic : .hidden, for: .tabBar)
-                        .tabItem { Label(item.title, systemImage: item.icon) }
+                        .tabItem { Image(systemName: item.icon).accessibilityLabel(item.title) }
                         .tag(item.rawValue)
                         .badge(social.unread(item))
                 }
                 MoreView()
                     .toolbar(glass ? .automatic : .hidden, for: .tabBar)
-                    .tabItem { Label("更多", systemImage: "square.grid.2x2") }
+                    .tabItem { Image(systemName: "square.grid.2x2").accessibilityLabel("更多") }
                     .tag("more")
             }
         }

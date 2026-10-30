@@ -24,7 +24,7 @@ struct IOSPortalHealthConnectionView: View {
                     }.accessibilityIdentifier("portalHealthResult")
                 } else {
                     VStack(alignment: .leading, spacing: 24) {
-                        detail("chart.bar.xaxis", "连接你的健康数据", "共享你选择的活动、睡眠、锻炼、心肺和身体指标，包括能量、距离、心率变异性、血氧、血压和体脂等 26 类数据。")
+                        detail("chart.bar.xaxis", "连接你的健康数据", "共享你选择的活动、睡眠、锻炼、心肺和身体指标，包括营养、步态、跑步指标、正念、生理周期、血氧、血压和体脂等 \(IOSPortalHealth.categories.count) 类数据。")
                         detail("slider.horizontal.3", "由你选择共享范围", "点击继续后向系统发起关联。首次请求会显示健康共享选择页；已选择过的项目可能不再弹窗。Being 只能读取系统允许的内容，不会修改健康记录。")
                         detail("link", "随时断开关联", "你可以在 Portal 中断开，停止后续查询。关联只对当前 Being 生效，查询需要应用在前台且 Portal 已启动。")
                     }

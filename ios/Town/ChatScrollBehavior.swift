@@ -20,9 +20,13 @@ struct ChatScrollBehavior: ViewModifier {
                 .defaultScrollAnchor(followLatest ? .bottom : nil, for: .sizeChanges)
                 .onScrollPhaseChange { _, phase in
                     let wasUserScrolling = userScrolling
-                    userScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
-                    if phase == .tracking { scrollingTowardBottom = false }
-                    if userScrolling { followLatest = false }
+                    let scrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+                    if userScrolling != scrolling { userScrolling = scrolling }
+                    #if DEBUG
+                    if wasUserScrolling != userScrolling { ChatPerformanceProbe.shared.mark(userScrolling ? "scroll-start" : "scroll-end") }
+                    #endif
+                    if phase == .tracking && scrollingTowardBottom { scrollingTowardBottom = false }
+                    if userScrolling && followLatest { followLatest = false }
                     if phase == .idle && wasUserScrolling && nearBottom && scrollingTowardBottom { followLatest = true }
                 }
                 .onScrollGeometryChange(for: ChatScrollMetrics.self) { geometry in
@@ -31,10 +35,11 @@ struct ChatScrollBehavior: ViewModifier {
                 } action: { old, metrics in
                     // Geometry observes position only. Issuing scroll commands
                     // here creates a feedback loop as LazyVStack estimates heights.
-                    nearBottom = metrics.bottom
+                    if nearBottom != metrics.bottom { nearBottom = metrics.bottom }
                     if userScrolling && old.height == metrics.height && old.offset != metrics.offset {
-                        scrollingTowardBottom = metrics.offset > old.offset
-                        if !scrollingTowardBottom { followLatest = false }
+                        let towardBottom = metrics.offset > old.offset
+                        if scrollingTowardBottom != towardBottom { scrollingTowardBottom = towardBottom }
+                        if !towardBottom && followLatest { followLatest = false }
                     }
                 }
         } else {
@@ -74,7 +79,7 @@ struct ChatScrollBehavior: ViewModifier {
 
     private func updateLegacyPosition(_ metrics: LegacyChatScrollMetrics) {
         guard viewportHeight > 0, metrics.height > 0 else { return }
-        nearBottom = metrics.bottom
+        if nearBottom != metrics.bottom { nearBottom = metrics.bottom }
         // A drag can coast to the bottom after the finger is lifted.
         if nearBottom && scrollingTowardBottom && !userScrolling { followLatest = true }
     }

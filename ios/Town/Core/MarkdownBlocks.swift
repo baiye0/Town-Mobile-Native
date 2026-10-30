@@ -1,6 +1,6 @@
 import Foundation
-public struct MarkdownBlock: Equatable {
-    public enum Kind { case paragraph, heading, code, quote, list, rule, table, image }
+public struct MarkdownBlock: Equatable, Sendable {
+    public enum Kind: Sendable { case paragraph, heading, code, quote, list, rule, table, image }
     public var kind: Kind
     public var text: String
     public var level: Int = 0

@@ -140,8 +140,8 @@ import HealthKit
         let (start, end) = try IOSPortalHealth.range([:], now: now)
         XCTAssertEqual(end, now)
         XCTAssertEqual(end.timeIntervalSince(start), 7 * 86400)
-        XCTAssertEqual(IOSPortalHealth.categories.count, 26)
-        XCTAssertEqual(Set(IOSPortalHealth.categories.map(\.id)).count, 26)
+        XCTAssertGreaterThanOrEqual(IOSPortalHealth.categories.count, 100)
+        XCTAssertEqual(Set(IOSPortalHealth.categories.map(\.id)).count, IOSPortalHealth.categories.count)
         let oxygen = try XCTUnwrap(IOSPortalHealth.categories.first { $0.id == "oxygen_saturation" })
         let sample = HKQuantitySample(type: HKQuantityType(.oxygenSaturation), quantity: HKQuantity(unit: .percent(), doubleValue: 0.98), start: now, end: now)
         XCTAssertEqual(IOSPortalHealth.encode(sample, category: oxygen)["value"] as? Double, 98)
@@ -155,6 +155,65 @@ import HealthKit
         XCTAssertEqual(row["value"] as? Double, 72)
         XCTAssertEqual(row["unit"] as? String, "kg")
         XCTAssertTrue(IOSPortalHealth.disclosure.contains("Empty results"))
+    }
+    func testExpandedHealthCatalogHasCompatibleUnitsAndCategoryEncoding() throws {
+        for item in IOSPortalHealth.categories {
+            if let type = item.type as? HKQuantityType {
+                let unit = try XCTUnwrap(item.unit, item.id)
+                XCTAssertTrue(type.is(compatibleWith: unit), item.id)
+                XCTAssertEqual(IOSPortalHealth.dailyTotals.contains(item.id), type.aggregationStyle == .cumulative, item.id)
+            }
+        }
+        XCTAssertTrue(IOSPortalHealth.dailyTotals.contains("dietary_water"))
+        XCTAssertFalse(IOSPortalHealth.dailyTotals.contains("running_speed"))
+        let mindful = try XCTUnwrap(IOSPortalHealth.categories.first { $0.id == "mindful_sessions" })
+        let end = Date(), start = end.addingTimeInterval(-600)
+        let sample = HKCategorySample(type: HKCategoryType(.mindfulSession), value: HKCategoryValue.notApplicable.rawValue, start: start, end: end)
+        let row = IOSPortalHealth.encode(sample, category: mindful)
+        XCTAssertNil(row["stage"], "Non-sleep categories must never be encoded as sleep stages")
+        XCTAssertEqual(row["duration_seconds"] as? Double, 600)
+        XCTAssertEqual(row["value"] as? Int, HKCategoryValue.notApplicable.rawValue)
+    }
+    func testExistingHealthLinkRequestsNewTypesBeforeExposingThem() async throws {
+        portal.configure { $0.grants = ["health.steps.read"] }
+        let before = try await portal.call("portal_ios_capabilities", [:])
+        XCTAssertEqual(((before["health"] as? [String: Any])?["categories"] as? [[String: Any]])?.count, 1)
+        let linked = await portal.connectHealth()
+        XCTAssertTrue(linked)
+        XCTAssertTrue(portal.options.grants.contains("health.dietary_water.read"))
+        XCTAssertEqual(health.authorizations.last, Set(IOSPortalHealth.categories.map(\.id)))
+    }
+    func testHealthReadActivityAppearsWhileWaitingAndSurvivesReload() async throws {
+        await portal.connectHealth()
+        health.suspendRead = true
+        let request = Task { await portal.dispatch(["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": "portal_ios_health", "arguments": ["category": "steps"]]]) }
+        while health.readReply == nil { await Task.yield() }
+        XCTAssertEqual(portal.activity.first?.status, "执行中")
+        let id = portal.activity.first?.id
+        health.readReply?.resume(returning: ["records": []]); health.readReply = nil
+        _ = await request.value
+        XCTAssertEqual(portal.activity.count, 1)
+        XCTAssertEqual(portal.activity.first?.id, id)
+        XCTAssertEqual(portal.activity.first?.status, "读取完成 · 无可用记录")
+        await portal.flushActivity()
+        let restored = IOSPortalStore(base: home, permissions: access, health: health)
+        restored.bind(portal.connection)
+        XCTAssertEqual(restored.activity.first?.id, id)
+        XCTAssertEqual(restored.activity.first?.status, "读取完成 · 无可用记录")
+        restored.bind(try Connection("https://example.invalid/bob?token=test"))
+        XCTAssertTrue(restored.activity.isEmpty)
+    }
+    func testSuspendedHealthReadIsRecordedAsInterrupted() async {
+        await portal.connectHealth()
+        health.suspendRead = true
+        let request = Task { await portal.dispatch(["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": "portal_ios_health", "arguments": ["category": "steps"]]]) }
+        while health.readReply == nil { await Task.yield() }
+        portal.wanted = true
+        portal.suspend()
+        health.readReply?.resume(returning: ["records": []]); health.readReply = nil
+        let response = await request.value
+        XCTAssertNil(response)
+        XCTAssertEqual(portal.activity.first?.status, "已中断")
     }
 }
 

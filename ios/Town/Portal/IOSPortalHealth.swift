@@ -47,9 +47,90 @@ import HealthKit
         quantity("waist_circumference", "腰围", .waistCircumference, .meterUnit(with: .centi), "cm"),
         quantity("body_temperature", "体温", .bodyTemperature, .degreeCelsius(), "degC"),
         quantity("blood_pressure_systolic", "收缩压", .bloodPressureSystolic, .millimeterOfMercury(), "mmHg"),
-        quantity("blood_pressure_diastolic", "舒张压", .bloodPressureDiastolic, .millimeterOfMercury(), "mmHg")
+        quantity("blood_pressure_diastolic", "舒张压", .bloodPressureDiastolic, .millimeterOfMercury(), "mmHg"),
+        quantity("walking_heart_rate", "步行平均心率", .walkingHeartRateAverage, HKUnit.count().unitDivided(by: .minute()), "count/min"),
+        quantity("heart_rate_recovery", "一分钟心率恢复", .heartRateRecoveryOneMinute, HKUnit.count().unitDivided(by: .minute()), "count/min"),
+        quantity("atrial_fibrillation_burden", "房颤负荷", .atrialFibrillationBurden, .percent(), "%", scale: 100),
+        quantity("walking_speed", "步行速度", .walkingSpeed, HKUnit.meter().unitDivided(by: .second()), "m/s"),
+        quantity("walking_step_length", "步行步长", .walkingStepLength, .meter(), "m"),
+        quantity("walking_asymmetry", "步行不对称性", .walkingAsymmetryPercentage, .percent(), "%", scale: 100),
+        quantity("walking_double_support", "双脚支撑时间占比", .walkingDoubleSupportPercentage, .percent(), "%", scale: 100),
+        quantity("walking_steadiness", "步行稳定性", .appleWalkingSteadiness, .percent(), "%", scale: 100),
+        quantity("stair_ascent_speed", "上楼速度", .stairAscentSpeed, HKUnit.meter().unitDivided(by: .second()), "m/s"),
+        quantity("stair_descent_speed", "下楼速度", .stairDescentSpeed, HKUnit.meter().unitDivided(by: .second()), "m/s"),
+        quantity("six_minute_walk_distance", "六分钟步行距离", .sixMinuteWalkTestDistance, .meter(), "m"),
+        quantity("running_speed", "跑步速度", .runningSpeed, HKUnit.meter().unitDivided(by: .second()), "m/s"),
+        quantity("running_power", "跑步功率", .runningPower, .watt(), "W"),
+        quantity("running_stride_length", "跑步步幅", .runningStrideLength, .meter(), "m"),
+        quantity("running_ground_contact_time", "跑步触地时间", .runningGroundContactTime, .secondUnit(with: .milli), "ms"),
+        quantity("running_vertical_oscillation", "跑步垂直振幅", .runningVerticalOscillation, .meterUnit(with: .centi), "cm"),
+        quantity("swimming_strokes", "游泳划水次数", .swimmingStrokeCount, .count(), "count"),
+        quantity("wheelchair_distance", "轮椅距离", .distanceWheelchair, .meter(), "m"),
+        quantity("push_count", "轮椅推动次数", .pushCount, .count(), "count"),
+        quantity("blood_glucose", "血糖", .bloodGlucose, HKUnit.gramUnit(with: .milli).unitDivided(by: .literUnit(with: .deci)), "mg/dL"),
+        quantity("insulin_delivery", "胰岛素输注", .insulinDelivery, .internationalUnit(), "IU"),
+        quantity("basal_body_temperature", "基础体温", .basalBodyTemperature, .degreeCelsius(), "degC"),
+        quantity("sleeping_wrist_temperature", "睡眠腕温", .appleSleepingWristTemperature, .degreeCelsius(), "degC"),
+        quantity("forced_expiratory_volume", "第一秒用力呼气量", .forcedExpiratoryVolume1, .liter(), "L"),
+        quantity("forced_vital_capacity", "用力肺活量", .forcedVitalCapacity, .liter(), "L"),
+        quantity("peak_expiratory_flow", "呼气峰值流量", .peakExpiratoryFlowRate, HKUnit.liter().unitDivided(by: .minute()), "L/min"),
+        quantity("environmental_audio_exposure", "环境音量", .environmentalAudioExposure, .decibelAWeightedSoundPressureLevel(), "dBASPL"),
+        quantity("headphone_audio_exposure", "耳机音量", .headphoneAudioExposure, .decibelAWeightedSoundPressureLevel(), "dBASPL"),
+        quantity("uv_exposure", "紫外线指数", .uvExposure, .count(), "count"),
+        quantity("underwater_depth", "水下深度", .underwaterDepth, .meter(), "m"),
+        quantity("water_temperature", "水温", .waterTemperature, .degreeCelsius(), "degC"),
+        quantity("dietary_water", "饮水量", .dietaryWater, .literUnit(with: .milli), "mL"),
+        quantity("dietary_energy", "膳食能量", .dietaryEnergyConsumed, .kilocalorie(), "kcal"),
+        quantity("dietary_protein", "蛋白质", .dietaryProtein, .gram(), "g"),
+        quantity("dietary_carbohydrates", "碳水化合物", .dietaryCarbohydrates, .gram(), "g"),
+        quantity("dietary_fat_total", "总脂肪", .dietaryFatTotal, .gram(), "g"),
+        quantity("dietary_fat_saturated", "饱和脂肪", .dietaryFatSaturated, .gram(), "g"),
+        quantity("dietary_fat_monounsaturated", "单不饱和脂肪", .dietaryFatMonounsaturated, .gram(), "g"),
+        quantity("dietary_fat_polyunsaturated", "多不饱和脂肪", .dietaryFatPolyunsaturated, .gram(), "g"),
+        quantity("dietary_sugar", "糖", .dietarySugar, .gram(), "g"),
+        quantity("dietary_fiber", "膳食纤维", .dietaryFiber, .gram(), "g"),
+        quantity("dietary_cholesterol", "胆固醇", .dietaryCholesterol, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_sodium", "钠", .dietarySodium, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_potassium", "钾", .dietaryPotassium, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_calcium", "钙", .dietaryCalcium, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_iron", "铁", .dietaryIron, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_magnesium", "镁", .dietaryMagnesium, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_zinc", "锌", .dietaryZinc, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_caffeine", "咖啡因", .dietaryCaffeine, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_vitamin_a", "维生素 A", .dietaryVitaminA, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_vitamin_b6", "维生素 B6", .dietaryVitaminB6, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_vitamin_b12", "维生素 B12", .dietaryVitaminB12, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_vitamin_c", "维生素 C", .dietaryVitaminC, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_vitamin_d", "维生素 D", .dietaryVitaminD, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_vitamin_e", "维生素 E", .dietaryVitaminE, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_vitamin_k", "维生素 K", .dietaryVitaminK, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_thiamin", "维生素 B1", .dietaryThiamin, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_riboflavin", "维生素 B2", .dietaryRiboflavin, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_niacin", "烟酸", .dietaryNiacin, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_folate", "叶酸", .dietaryFolate, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_biotin", "生物素", .dietaryBiotin, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_pantothenic_acid", "泛酸", .dietaryPantothenicAcid, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_phosphorus", "磷", .dietaryPhosphorus, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_iodine", "碘", .dietaryIodine, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_selenium", "硒", .dietarySelenium, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_copper", "铜", .dietaryCopper, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_manganese", "锰", .dietaryManganese, .gramUnit(with: .milli), "mg"),
+        quantity("dietary_chromium", "铬", .dietaryChromium, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_molybdenum", "钼", .dietaryMolybdenum, .gramUnit(with: .micro), "mcg"),
+        quantity("dietary_chloride", "氯", .dietaryChloride, .gramUnit(with: .milli), "mg"),
+        Category(id: "mindful_sessions", title: "正念", type: HKCategoryType(.mindfulSession), unit: nil, unitName: nil),
+        Category(id: "stand_hours", title: "站立小时", type: HKCategoryType(.appleStandHour), unit: nil, unitName: nil),
+        Category(id: "menstrual_flow", title: "月经", type: HKCategoryType(.menstrualFlow), unit: nil, unitName: nil),
+        Category(id: "intermenstrual_bleeding", title: "非经期出血", type: HKCategoryType(.intermenstrualBleeding), unit: nil, unitName: nil),
+        Category(id: "ovulation_test", title: "排卵检测", type: HKCategoryType(.ovulationTestResult), unit: nil, unitName: nil),
+        Category(id: "cervical_mucus", title: "宫颈黏液", type: HKCategoryType(.cervicalMucusQuality), unit: nil, unitName: nil),
+        Category(id: "sexual_activity", title: "性活动", type: HKCategoryType(.sexualActivity), unit: nil, unitName: nil),
+        Category(id: "high_heart_rate_events", title: "高心率通知", type: HKCategoryType(.highHeartRateEvent), unit: nil, unitName: nil),
+        Category(id: "low_heart_rate_events", title: "低心率通知", type: HKCategoryType(.lowHeartRateEvent), unit: nil, unitName: nil),
+        Category(id: "irregular_heart_rhythm_events", title: "心律不齐通知", type: HKCategoryType(.irregularHeartRhythmEvent), unit: nil, unitName: nil)
     ]
-    static let dailyTotals: Set<String> = ["steps", "walking_running_distance", "cycling_distance", "swimming_distance", "flights_climbed", "active_energy", "resting_energy", "exercise_time", "stand_time"]
+    // Match HealthKit's aggregation style, including nutrition and mobility totals.
+    static let dailyTotals = Set(categories.filter { ($0.type as? HKQuantityType)?.aggregationStyle == .cumulative }.map(\.id))
     nonisolated static let disclosure = "iOS does not disclose read authorization. Empty results may mean no data or access not granted; never interpret them as zero. Sleep samples may overlap across sources."
     private let store = HKHealthStore()
     private var queries: [UUID: (HKQuery, CheckedContinuation<[String: Any], Error>, Task<Void, Never>)] = [:]
@@ -133,8 +214,12 @@ import HealthKit
         if let quantity = sample as? HKQuantitySample, let unit = category.unit {
             row["value"] = quantity.quantity.doubleValue(for: unit) * category.scale; row["unit"] = category.unitName
         }
-        if let sleep = sample as? HKCategorySample {
-            row["stage"] = [0: "in_bed", 1: "asleep_unspecified", 2: "awake", 3: "asleep_core", 4: "asleep_deep", 5: "asleep_rem"][sleep.value] ?? "unknown"
+        if let value = sample as? HKCategorySample {
+            row["value"] = value.value
+            row["category_type"] = value.categoryType.identifier
+            if category.id == "sleep" {
+                row["stage"] = [0: "in_bed", 1: "asleep_unspecified", 2: "awake", 3: "asleep_core", 4: "asleep_deep", 5: "asleep_rem"][value.value] ?? "unknown"
+            }
             row["duration_seconds"] = sample.endDate.timeIntervalSince(sample.startDate)
         }
         if let workout = sample as? HKWorkout {

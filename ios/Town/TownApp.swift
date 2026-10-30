@@ -92,7 +92,7 @@ struct RootView: View {
                 do { try await Task.sleep(for: .seconds(10)) } catch { return }
             }
         }
-        .onChange(of: phase) { value in if value == .active { Task { await store.history() } } else if value == .background { speech.stop() } }
+        .onChange(of: phase) { value in if value == .background { speech.stop() } }
         .onChange(of: inputFocused) { value in nav.keyboardVisible = value }
         .onChange(of: nav.sidebar) { opened in if opened { inputFocused = false } }
         .onChange(of: nav.selected) { _ in inputFocused = false }
@@ -240,97 +240,15 @@ struct ChatView: View {
     var body: some View {
         let allMessages = store.displayMessages
         let messages = allMessages
-        let lastUserIndex = messages.lastIndex(where: { $0.role == "user" }) ?? -1
         ScrollViewReader { proxy in
             ScrollView {
                 if !messages.isEmpty {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                            VStack(alignment: .leading, spacing: 8) {
-                            if let time = message.timestamp, index == 0 || messages[index - 1].timestamp?.prefix(16) != time.prefix(16) {
-                                Text(chatTime(time)).font(.caption2).foregroundStyle(ClientTheme.secondary).frame(maxWidth:.infinity).padding(.vertical,4)
-                            }
-                            if message.kind == "marker" { HStack { Rectangle().frame(height:1); Text(message.text).font(.caption); Rectangle().frame(height:1) }.foregroundStyle(ClientTheme.secondary).padding(.vertical,8) }
-                            else {
-                                let isUser = message.role == "user"
-                                let isGlobalBeingMessage = message.sceneID == nil && message.role == "being" && message.kind == nil
-                                let hasAttachment = isUser && (!((message.files ?? []).isEmpty) || message.text.contains("[attachment-message:v1:"))
-                                let originalText = hasAttachment ? DeliveryRules.displayText(message.text).trimmingCharacters(in: .whitespacesAndNewlines) : ""
-                                HStack(alignment: .center, spacing: 4) {
-                                    if isUser {
-                                        Spacer(minLength: 16)
-                                        DeliveryStatusView(message: message)
-                                    }
-                                    if hasAttachment {
-                                        VStack(alignment: .trailing, spacing: 8) {
-                                            VStack(alignment: .trailing, spacing: 9) {
-                                                if (store.showAllScenes && message.sceneID != store.selected) || isGlobalBeingMessage {
-                                                    Text(isGlobalBeingMessage ? "全局消息" : store.sceneName(message))
-                                                        .font(.caption)
-                                                        .foregroundStyle(ClientTheme.secondary)
-                                                        .lineLimit(1)
-                                                        .truncationMode(.tail)
-                                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                                }
-                                                AttachmentMessageView(message: message, foreground: ClientTheme.text, attachmentCards: true).tint(ClientTheme.accent)
-                                            }
-
-                                            if !originalText.isEmpty {
-                                                MarkdownText(text: originalText, foreground: .white, fillsWidth: false)
-                                                    .padding(.horizontal, 16)
-                                                    .padding(.vertical, 12)
-                                                    .background(ClientTheme.chatSent, in: RoundedRectangle(cornerRadius: 22))
-                                            }
-                                        }
-                                        .contextMenu {
-                                            ShareLink(item: originalText.isEmpty ? DeliveryRules.displayText(message.text) : originalText)
-                                            Button("引用到草稿") {
-                                                let value = originalText.isEmpty ? DeliveryRules.displayText(message.text) : originalText
-                                                store.draft += (store.draft.isEmpty ? "" : "\n\n") + value.split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n")
-                                            }
-                                            BeingIconButton("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = originalText.isEmpty ? DeliveryRules.displayText(message.text) : originalText }
-                                            if store.canDeleteMessage(message) { BeingIconButton("删除", systemImage: "trash", role: .destructive) { store.deleteMessage(message) } }
-                                        }
-                                    } else {
-                                        VStack(alignment: .leading, spacing: 9) {
-                                            if (store.showAllScenes && message.sceneID != store.selected) || isGlobalBeingMessage {
-                                                Text(isGlobalBeingMessage ? "全局消息" : store.sceneName(message))
-                                                    .font(.caption)
-                                                    .foregroundStyle(isUser ? .white : ClientTheme.secondary)
-                                                    .lineLimit(1)
-                                                    .truncationMode(.tail)
-                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                            }
-                                            AttachmentMessageView(message: message, foreground: isUser ? .white : ClientTheme.text).tint(isUser ? .white : ClientTheme.accent)
-                                        }.padding(16)
-                                            .background(isUser ? ClientTheme.chatSent : ClientTheme.chatReply, in: RoundedRectangle(cornerRadius: 22))
-                                            .contextMenu {
-                                                ShareLink(item: DeliveryRules.displayText(message.text))
-                                                Button("引用到草稿") { store.draft += (store.draft.isEmpty ? "" : "\n\n") + DeliveryRules.displayText(message.text).split(separator: "\n", omittingEmptySubsequences: false).map { "> " + $0 }.joined(separator: "\n") }
-                                                BeingIconButton("复制", systemImage: "doc.on.doc") { UIPasteboard.general.string = DeliveryRules.displayText(message.text) }
-                                                if store.canDeleteMessage(message) { BeingIconButton("删除", systemImage: "trash", role: .destructive) { store.deleteMessage(message) } }
-                                            }
-                                    }
-                                    if !isUser { Spacer(minLength: 24) }
-                                }
-                                if isUser {
-                                    let running = store.busy && store.outbox.contains {
-                                        $0.id == store.activeSendID && $0.userID == message.id && $0.endpoint == store.connection?.endpoint
-                                    }
-                                    if running || message.process?.isEmpty == false {
-                                        ChatRunView(process: message.process ?? "", activity: store.activity, isActive: running)
-                                    }
-                                }
-                            }
-                            }.id(message.id)
-                                .modifier(StreamReplyGeometry(tracked: message.id == store.streamingReplyID &&
-                                    index > lastUserIndex,
-                                    viewportHeight: legacyViewportHeight, fillsViewport: $replyFillsViewport))
-                        }
-                        if store.historyLoading { ProgressView() }
-                        Color.clear.frame(height: 1).id("bottom")
-                    }.padding(24).modifier(LegacyChatContentGeometry(viewportHeight: legacyViewportHeight,
-                                                                   metrics: $legacyScrollMetrics))
+                    ChatMessageRows(store: store, messages: messages, streamingReplyID: store.streamingReplyID,
+                                    viewportHeight: store.streamingReplyID == nil ? 0 : legacyViewportHeight,
+                                    historyLoading: store.historyLoading,
+                                    replyFillsViewport: $replyFillsViewport).equatable()
+                        .modifier(LegacyChatContentGeometry(viewportHeight: legacyViewportHeight,
+                                                           metrics: $legacyScrollMetrics))
                 } else {
                     VStack(alignment: .leading, spacing: 28) {
                         Image("ClientLogo").resizable().scaledToFit().frame(width: 88, height: 88)
@@ -385,7 +303,10 @@ struct ChatView: View {
                                              legacyMetrics: legacyScrollMetrics, viewportHeight: $legacyViewportHeight))
                 .task(id: bottomRequest) {
                     guard bottomRequest > 0, followLatest, !userScrolling else { return }
-                    await Task.yield()
+                    // Viewport notifications arrive during keyboard/composer
+                    // layout. Coalesce into the next frame before using the new
+                    // scroll extent; Task.yield alone can run in the same pass.
+                    do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
                     guard !Task.isCancelled, followLatest, !userScrolling else { return }
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
@@ -415,7 +336,7 @@ struct ChatView: View {
         .background(ClientTheme.background).sheet(isPresented: $showConnection) { SettingsView() }
     }
 }
-private struct DeliveryStatusView: View {
+struct DeliveryStatusView: View {
     let message: Message
     @EnvironmentObject private var store: Store
     private var entry: PendingSend? { store.outbox.first { $0.userID == message.id && $0.endpoint == store.connection?.endpoint } }
@@ -434,12 +355,39 @@ private struct DeliveryStatusView: View {
         }
     }
 }
-func chatTime(_ value:String) -> String {
-    let fractional=ISO8601DateFormatter(); fractional.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
-    guard let date=fractional.date(from:value) ?? ISO8601DateFormatter().date(from:value) else{return String(value.replacingOccurrences(of:"T",with:" ").prefix(16))}
-    let format=DateFormatter();format.dateStyle = Calendar.current.isDateInToday(date) ? .none : .medium;format.timeStyle = .short
-    return format.string(from:date)
+@MainActor private enum ChatDateFormats {
+    static let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return formatter
+    }()
+    static let standard = ISO8601DateFormatter()
+    // Setting dateStyle on every row clears DateFormatter's expensive internal
+    // formatter. Keep both styles ready and cache ISO parsing across relayouts.
+    static let today: DateFormatter = display(dateStyle: .none)
+    static let earlier: DateFormatter = display(dateStyle: .medium)
+    static let dates: NSCache<NSString, NSDate> = {
+        let cache = NSCache<NSString, NSDate>(); cache.countLimit = 2000; return cache
+    }()
+    private static func display(dateStyle: DateFormatter.Style) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .autoupdatingCurrent; formatter.timeZone = .autoupdatingCurrent
+        formatter.dateStyle = dateStyle; formatter.timeStyle = .short
+        return formatter
+    }
+    static func date(_ value: String) -> Date? {
+        if let cached = dates.object(forKey: value as NSString) { return cached as Date }
+        guard let date = fractional.date(from: value) ?? standard.date(from: value) else { return nil }
+        dates.setObject(date as NSDate, forKey: value as NSString)
+        return date
+    }
 }
+@MainActor func chatTime(_ value: String) -> String {
+    guard let date = ChatDateFormats.date(value) else {
+        return String(value.replacingOccurrences(of: "T", with: " ").prefix(16))
+    }
+    let formatter = Calendar.current.isDateInToday(date) ? ChatDateFormats.today : ChatDateFormats.earlier
+    return formatter.string(from: date)
+}
+
 struct HistoryView: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss

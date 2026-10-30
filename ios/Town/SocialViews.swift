@@ -70,6 +70,7 @@ struct SocialView: View {
     @State private var loading = false
     @State private var composeTarget: SocialComposeTarget?
     @State private var loadID = UUID()
+    @State private var visible = false
     @State private var showMembers = false
     @State private var showFilters = false
     @State private var showAnnouncements = false
@@ -144,7 +145,11 @@ struct SocialView: View {
                 }
             }.background(ClientTheme.background).foregroundStyle(ClientTheme.text)
                 .navigationTitle(roomList || roomID.isEmpty ? kind.title : roomTitle).navigationBarTitleDisplayMode(.inline)
-                .task(id: "\(social.identity?.id ?? "")|\(roomID)|\(mailbox)|\(limit)|\(social.revision)") { await load() }
+                .onAppear { visible = true }
+                .onDisappear { visible = false; loadID = UUID(); loading = false }
+                .task(id: "\(social.identity?.id ?? "")|\(roomID)|\(mailbox)|\(limit)|\(social.revision)|\(visible)") {
+                    if visible { await load() }
+                }
                 .onChange(of: social.identity?.id) { _ in rows = []; rooms = []; showMembers = false; composeTarget = nil; showFilters = false }
                 .sheet(item: $composeTarget) { target in SocialComposer(kind: kind, roomID: roomID, roomTitle: roomTitle, reply: target.reply, sentMailbox: mailbox == "sent") { Task { await load() } } }
                 .sheet(isPresented: $showMembers) { FiresideMembersView(roomID: roomID).presentationDetents([.medium, .large]) }
@@ -192,6 +197,15 @@ struct SocialView: View {
                 let detail = field(room, "description", "topic")
                 if !detail.isEmpty { Text(detail).font(.subheadline).foregroundStyle(ClientTheme.secondary).lineLimit(2) }
             }.frame(maxWidth: .infinity, alignment: .leading)
+            let unread = social.unread(firesideID: field(room, "id", "fireside_id"))
+            if unread > 0 {
+                Text(unread > 99 ? "99+" : String(unread))
+                    .font(.caption.weight(.semibold)).monospacedDigit().foregroundStyle(.white)
+                    .padding(.horizontal, 7).frame(minWidth: 22, minHeight: 22)
+                    .background(.red, in: Capsule())
+                    .accessibilityLabel("\(unread) 条未读消息")
+                    .accessibilityIdentifier("firesideUnread-" + field(room, "id", "fireside_id"))
+            }
             Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(ClientTheme.secondary).accessibilityHidden(true)
         }.padding(.vertical, 10).contentShape(Rectangle())
     }
@@ -200,6 +214,7 @@ struct SocialView: View {
         return filters.oldestFirst ? Array(filtered.reversed()) : filtered
     }
     @MainActor private func load() async {
+        guard visible else { return }
         guard social.identity != nil else { rows = []; rooms = []; return }
         let requestID = UUID(); loadID = requestID
         loading = true; error = nil; defer { if loadID == requestID { loading = false } }
@@ -217,7 +232,9 @@ struct SocialView: View {
             try Task.checkCancellation(); guard loadID == requestID else { return }
             if kind == .firesides && roomID.isEmpty { var ids: Set<String> = []; rooms = ((data["owned"] as? [[String: Any]] ?? []) + (data["joined"] as? [[String: Any]] ?? [])).filter { ids.insert(field($0, "id", "fireside_id")).inserted } }
             else { rows = FeedRules.newestFirst(data["messages"] as? [[String: Any]] ?? []).enumerated().map { SocialRow($0.element, index: $0.offset, peers:data["messages"] as? [[String:Any]] ?? []) } }
-            social.acknowledge(kind)
+            if kind == .firesides {
+                social.acknowledge(firesideID: roomID, messages: data["messages"] as? [[String: Any]] ?? [])
+            } else { social.acknowledge(kind) }
         } catch { if !Task.isCancelled && loadID == requestID { self.error = error is PortalError ? error.localizedDescription : "暂时无法读取，已有内容已保留。" } }
     }
 }

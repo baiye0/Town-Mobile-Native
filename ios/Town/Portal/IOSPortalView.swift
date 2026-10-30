@@ -14,7 +14,6 @@ struct IOSPortalView: View {
     @State private var export: PortalExport?
     @State private var exporting = false
     @State private var expanded = false
-    @State private var selectedAction: IOSPortalAction?
     @State private var linkingHealth = false
     private let capabilities = [("calendar", "日历", "calendar"), ("reminders", "提醒事项", "checklist"), ("contacts", "通讯录", "person.crop.rectangle"), ("location", "当前位置", "location")]
     var body: some View {
@@ -38,7 +37,7 @@ struct IOSPortalView: View {
                 if let notice = portal.notice { Text(notice).font(.footnote).foregroundStyle(.red).textSelection(.enabled) }
             }
             SettingsSection(title: "手机原生能力", icon: "hand.raised") {
-                SettingsNote(text: "按当前 Being 单独授权。读取结果会交给 Being；日历、提醒和联系人写入需在下方确认。系统权限与 Being 授权分别生效。")
+                SettingsNote(text: "按当前 Being 单独授权。读取结果会交给 Being；日历、提醒和联系人写入在获得授权后直接执行。系统权限与 Being 授权分别生效。")
                 VStack(alignment: .leading, spacing: 0) {
                     Button { withAnimation { expanded.toggle() } } label: {
                         HStack {
@@ -54,7 +53,7 @@ struct IOSPortalView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Label(capability.1, systemImage: capability.2).font(.headline)
                                     Toggle("允许读取", isOn: grant(capability.0 + ".read")).disabled(portal.authorizing != nil || portal.healthRequesting)
-                                    if capability.0 != "location" { Toggle("允许请求写入", isOn: grant(capability.0 + ".write")).disabled(portal.authorizing != nil || portal.healthRequesting) }
+                                    if capability.0 != "location" { Toggle("允许写入", isOn: grant(capability.0 + ".write")).disabled(portal.authorizing != nil || portal.healthRequesting) }
                                     Text("系统权限：\(portal.permissions.permission(capability.0).label)").font(.caption).foregroundStyle(ClientTheme.secondary)
                                     if portal.authorizing == capability.0 { ProgressView("等待系统授权结果…") }
                                     if !portal.permissions.permission(capability.0).available {
@@ -82,8 +81,9 @@ struct IOSPortalView: View {
                     Spacer()
                     if portal.healthRequesting { ProgressView() }
                 }
-                SettingsNote(text: "关联活动、睡眠、锻炼、心肺和身体指标等 26 类健康数据，由你在系统页选择共享范围。只读取，不修改健康记录。")
+                SettingsNote(text: "关联活动、睡眠、锻炼、心肺、营养和身体指标等 \(IOSPortalHealth.categories.count) 类健康数据，由你在系统页选择共享范围。只读取，不修改健康记录。")
                 if portal.healthLinked {
+                    SettingsNote(text: "新增类型需点击管理健康关联与共享范围，再点击继续，向系统请求共享。")
                     SettingsNote(text: "关联状态仅表示已连接此数据来源。实际读取范围由 Apple 健康控制，iOS 不向 App 透露每类数据是否允许读取。")
                     Button("管理健康关联与共享范围") { portal.notice = nil; linkingHealth = true }
                         .disabled(portal.healthRequesting || portal.authorizing != nil)
@@ -100,22 +100,6 @@ struct IOSPortalView: View {
                 }
                 if !portal.health.available { SettingsNote(text: "此设备暂不支持 Apple 健康。") }
             }.disabled(store.connection == nil)
-            SettingsSection(title: "待确认操作", icon: "checkmark.shield") {
-                let pending = portal.actions.filter { $0.state == "pending" }
-                if pending.isEmpty { SettingsNote(text: "暂无待确认操作") }
-                ForEach(pending) { action in
-                    Button { selectedAction = action } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(actionTitle(action)).font(.subheadline.weight(.medium))
-                                Text(action.created, style: .time).font(.caption).foregroundStyle(ClientTheme.secondary)
-                            }
-                            Spacer(); Image(systemName: "chevron.right")
-                        }.frame(minHeight: 44)
-                    }.buttonStyle(.plain)
-                }
-                if portal.actions.contains(where: { $0.state == "unknown" }) { SettingsNote(text: "有操作的执行结果待核实，请在系统 App 中检查。相同请求不会自动再次执行。") }
-            }
             SettingsSection(title: "文件工作区", icon: "folder") {
                 Toggle("允许文件读写与搜索", isOn: Binding(get: { portal.options.files }, set: { value in portal.configure { $0.files = value } })).disabled(store.connection == nil)
                 SettingsNote(text: "每个 Being 使用独立目录。导入的文件可被该 Being 读取和修改，单文件不超过 10 MB。卸载应用会删除工作区，请及时导出。")
@@ -149,14 +133,14 @@ struct IOSPortalView: View {
                 ForEach(portal.activity.prefix(20)) { event in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(event.tool).font(.caption.monospaced()).lineLimit(2)
-                        HStack { Text(event.status); Spacer(); Text(event.time, style: .time) }.font(.caption).foregroundStyle(ClientTheme.secondary)
+                        HStack { Text(event.status); Spacer(); Text(event.time, format: .dateTime.month().day().hour().minute()) }.font(.caption).foregroundStyle(ClientTheme.secondary)
                     }
                 }
             }
             SettingsNote(text: "当前支持文件、日历、提醒事项、通讯录、前台定位和 Apple 健康关联。Shell、网页抓取、其他应用通知、地点提醒和屏幕控制暂不支持。")
         }.navigationTitle("本机 Portal")
         .task { portal.bind(store.connection); name = portal.options.name; refreshFiles() }
-        .onChange(of: store.connection) { value in portal.bind(value); name = portal.options.name; directory = "."; selectedAction = nil; linkingHealth = false; export = nil; refreshFiles() }
+        .onChange(of: store.connection) { value in portal.bind(value); name = portal.options.name; directory = "."; linkingHealth = false; export = nil; refreshFiles() }
         .onChange(of: phase) { if $0 == .active { portal.refreshPermissions() } }
         .sheet(isPresented: $linkingHealth) {
             IOSPortalHealthConnectionView(portal: portal)
@@ -180,39 +164,6 @@ struct IOSPortalView: View {
         .fileExporter(isPresented: $exporting, document: export, contentType: .data, defaultFilename: export?.name ?? "file") { result in
             if case .failure = result { portal.notice = "文件导出失败，请重试。" }; export = nil
         }
-        .sheet(item: $selectedAction) { action in
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Text(actionTitle(action)).font(.title2.bold())
-                        Text("Being：\(store.connection?.being ?? "")").font(.subheadline)
-                        Text("确认后会修改系统数据，可能同步到你的账户。请核对完整内容。").font(.footnote).foregroundStyle(ClientTheme.secondary)
-                        if let preview = action.preview, !preview.isEmpty {
-                            Text("当前记录").font(.headline)
-                            ForEach(preview.keys.sorted(), id: \.self) { key in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(key).font(.caption).foregroundStyle(ClientTheme.secondary)
-                                    Text(preview[key] ?? "").textSelection(.enabled)
-                                }
-                            }
-                            Divider()
-                            Text("请求内容").font(.headline)
-                        }
-                        if let args = try? JSONSerialization.jsonObject(with: action.arguments) as? [String: Any] {
-                            ForEach(args.keys.sorted().filter { $0 != "request_id" }, id: \.self) { key in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(fieldTitle(key)).font(.caption).foregroundStyle(ClientTheme.secondary)
-                                    Text(displayValue(args[key]!)).font(.body).textSelection(.enabled)
-                                }
-                            }
-                        }
-                        Button("确认执行", role: (try? JSONSerialization.jsonObject(with: action.arguments) as? [String: Any])?["action"] as? String == "delete" ? .destructive : nil) { portal.decide(action.id, approve: true); selectedAction = nil }
-                            .buttonStyle(SettingsActionStyle()).disabled(!portal.actions.contains(where: { $0.id == action.id && $0.state == "pending" }))
-                        Button("拒绝此操作") { portal.decide(action.id, approve: false); selectedAction = nil }.buttonStyle(SettingsActionStyle(prominent: false))
-                    }.padding(24)
-                }.navigationTitle("确认操作").toolbar { Button("关闭") { selectedAction = nil } }
-            }
-        }
     }
     private func openSettings() {
         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -222,15 +173,6 @@ struct IOSPortalView: View {
         do { files = try portal.workspace?.list(directory).compactMap(PortalFileRow.init) ?? [] }
         catch { files = []; portal.notice = "工作区读取失败，请重试。" }
     }
-    private func actionTitle(_ action: IOSPortalAction) -> String {
-        let args = (try? JSONSerialization.jsonObject(with: action.arguments)) as? [String: Any] ?? [:]
-        let verb = ["create": "新建", "update": "修改", "delete": "删除"][args["action"] as? String ?? ""] ?? "处理"
-        return verb + (capabilities.first { action.tool == "portal_ios_" + $0.0 }?.1 ?? "系统数据")
-    }
-    private func fieldTitle(_ key: String) -> String {
-        ["action": "操作", "title": "标题", "start": "开始时间", "end": "结束时间", "due": "提醒时间", "given_name": "名字", "family_name": "姓氏", "phones": "电话", "emails": "邮箱", "notes": "备注", "completed": "已完成", "all_day": "全天", "id": "系统记录 ID", "calendar_id": "日历 ID"][key] ?? key
-    }
-    private func displayValue(_ value: Any) -> String { if let values = value as? [String] { return values.joined(separator: "\n") }; return String(describing: value) }
 }
 private struct PortalFileRow: Identifiable {
     let path: String; let name: String; let directory: Bool

@@ -1,6 +1,5 @@
 import Foundation
 import SwiftUI
-import UIKit
 
 struct IOSPortalAction: Codable, Identifiable {
     var id: String
@@ -8,16 +7,16 @@ struct IOSPortalAction: Codable, Identifiable {
     var arguments: Data
     var fingerprint: String
     var created = Date()
-    var state = "pending"
+    var state = "completed"
     var result: Data?
     var preview: [String: String]?
     var summary: String { "\(tool.replacingOccurrences(of: "portal_ios_", with: "")) · \((try? JSONSerialization.jsonObject(with: arguments) as? [String: Any])?["action"] as? String ?? "")" }
 }
-struct IOSPortalActivity: Identifiable {
-    let id = UUID()
-    let time = Date()
+struct IOSPortalActivity: Codable, Identifiable, Sendable {
+    var id = UUID()
+    var time = Date()
     let tool: String
-    let status: String
+    var status: String
 }
 
 @MainActor final class IOSPortalStore: ObservableObject {
@@ -42,6 +41,8 @@ struct IOSPortalActivity: Identifiable {
     private var ownerEpoch = UUID()
     let base: URL
     private var storageReady = false
+    private let activityQueue = DispatchQueue(label: "town.portal.activity", qos: .utility)
+    private var activitySnapshots: [String: [IOSPortalActivity]] = [:]
     var runner: Task<Void, Never>?
     var socket: URLSessionWebSocketTask?
     var session: URLSession?
@@ -80,7 +81,17 @@ struct IOSPortalActivity: Identifiable {
             if FileManager.default.fileExists(atPath: journal.path) { actions = try JSONDecoder().decode([IOSPortalAction].self, from: Data(contentsOf: journal)) }
             // A crash during a system write is ambiguous: never silently perform it again.
             for i in actions.indices where actions[i].state == "executing" { actions[i].state = "unknown" }
+            // Pending is a legacy state from the old phone-confirmation flow. Keep
+            // the record for auditability, but never surface or execute it now that
+            // native writes are immediate.
+            for i in actions.indices where actions[i].state == "pending" { actions[i].state = "cancelled" }
             storageReady = true
+            let log = home.appendingPathComponent("activity.json")
+            let saved = activitySnapshots[LocalPortalRules.owner(value)] ?? (try? Data(contentsOf: log)).flatMap { try? JSONDecoder().decode([IOSPortalActivity].self, from: $0) }
+            if let saved {
+                activity = Array(saved.prefix(100))
+                for i in activity.indices where activity[i].status == "执行中" { activity[i].status = "已中断" }
+            }
             try persist()
             refreshPermissions()
         } catch { storageReady = false; notice = "Portal 本地配置读取失败，已停止访问。请保留数据并重试。" }
@@ -97,9 +108,6 @@ struct IOSPortalActivity: Identifiable {
         do {
             try options.validate(); try persist()
             if previous.files != options.files { fileGeneration = UUID() }
-            // Revoked authorization also invalidates pending writes.
-            for i in actions.indices where actions[i].state == "pending" && !options.grants.contains(capability(actions[i].tool) + ".write") { actions[i].state = "cancelled" }
-            try persist()
             if previous.grants.filter({ $0.hasPrefix("health.") }) != options.grants.filter({ $0.hasPrefix("health.") }) { healthGeneration = UUID() }
             if let socket, phase == "connected" { Task { try? await Self.send(["jsonrpc": "2.0", "method": "notifications/tools/list_changed"], to: socket) } }
         } catch { options = previous; stop(); storageReady = false; notice = "设置保存失败，Portal 已停止。请重新打开此页面后重试。" }
@@ -181,58 +189,77 @@ struct IOSPortalActivity: Identifiable {
         guard options.grants.contains(capability(tool) + (write ? ".write" : ".read")) else { throw PortalError.server("当前 Being 未获此项授权。") }
         guard permissions.permission(capability(tool)).available else { throw PortalError.server("系统权限尚未授予，请在手机的 Portal 页面继续授权。") }
     }
-    func record(_ tool: String, _ status: String) {
-        activity.insert(IOSPortalActivity(tool: tool, status: status), at: 0)
-        activity = Array(activity.prefix(100))
+    func record(_ tool: String, _ status: String, id: UUID = UUID()) {
+        if let index = activity.firstIndex(where: { $0.id == id }) {
+            activity[index].status = status
+        } else {
+            activity.insert(IOSPortalActivity(id: id, tool: tool, status: status), at: 0)
+            if activity.count > 100 { activity.removeLast(activity.count - 100) }
+        }
+        saveActivity()
+    }
+    private func saveActivity() {
+        guard storageReady, let connection else { return }
+        let snapshot = activity
+        let owner = LocalPortalRules.owner(connection)
+        // Rebinding an owner may happen before its queued write reaches disk.
+        activitySnapshots[owner] = snapshot
+        let url = base.appendingPathComponent(owner).appendingPathComponent("activity.json")
+        // Preserve write order without encoding or touching disk on the UI actor.
+        activityQueue.async { [weak self] in
+            do { try JSONEncoder().encode(snapshot).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
+            catch { Task { @MainActor in
+                guard let self, self.connection == connection else { return }
+                self.notice = "最近活动暂未保存，请检查设备存储空间。"
+            } }
+        }
+    }
+    func flushActivity() async {
+        await withCheckedContinuation { continuation in activityQueue.async { continuation.resume() } }
     }
     func enqueue(_ tool: String, args: [String: Any]) throws -> [String: Any] {
         try check(tool, write: true)
         try native.validateWrite(capability(tool), args)
-        let id = try LocalPortalRules.string(args, "request_id", max: 128)
+        // request_id remains optional. Callers that provide it get idempotent
+        // retries; ordinary Portal calls execute without having to manufacture
+        // an approval token first.
+        let id = args["request_id"] == nil ? "ios-" + UUID().uuidString.lowercased() : try LocalPortalRules.string(args, "request_id", max: 128)
         let fingerprint = try LocalPortalRules.fingerprint(tool: tool, arguments: args)
         if let prior = actions.first(where: { $0.id == id }) {
             guard prior.fingerprint == fingerprint else { throw PortalError.server("request_id 已用于不同参数。") }
             return actionResult(prior)
         }
-        guard actions.filter({ $0.state == "pending" }).count < 20 else { throw PortalError.server("待确认操作已达上限，请先在手机处理。") }
-        let item = IOSPortalAction(id: id, tool: tool, arguments: try JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]), fingerprint: fingerprint, preview: try native.preview(capability(tool), args))
+        var item = IOSPortalAction(id: id, tool: tool, arguments: try JSONSerialization.data(withJSONObject: args, options: [.sortedKeys]), fingerprint: fingerprint, preview: try native.preview(capability(tool), args))
+        item.state = "executing"
         let previous = actions
         actions.append(item)
-        while actions.count > 400, let index = actions.firstIndex(where: { !["pending", "executing", "unknown"].contains($0.state) }) { actions.remove(at: index) }
+        while actions.count > 400, let index = actions.firstIndex(where: { !["executing", "unknown"].contains($0.state) }) { actions.remove(at: index) }
         guard actions.count <= 400 else { actions = previous; throw PortalError.server("操作记录已满。") }
         do { try persist() } catch { actions = previous; throw error }
-        return actionResult(item)
+        guard let index = actions.firstIndex(where: { $0.id == id }) else { throw PortalError.server("操作记录不可用。") }
+        do {
+            let result = try native.write(capability(tool), args)
+            actions[index].result = try JSONSerialization.data(withJSONObject: result)
+            actions[index].state = "completed"
+            do { try persist() } catch {
+                actions[index].state = "unknown"
+                try? persist()
+                throw error
+            }
+            return actionResult(actions[index])
+        } catch {
+            if actions[index].state == "executing" {
+                actions[index].state = "unknown"
+                try? persist()
+            }
+            throw error
+        }
     }
     func actionResult(_ item: IOSPortalAction) -> [String: Any] {
         var result: [String: Any] = ["request_id": item.id, "status": item.state]
         if let data = item.result, let object = try? JSONSerialization.jsonObject(with: data) { result["result"] = object }
-        if item.state == "pending" { result["message"] = "等待用户在手机 Portal 确认，尚未执行。" }
         if item.state == "unknown" { result["message"] = "执行结果待核实，请检查系统记录，勿自动重试。" }
         return result
-    }
-    func decide(_ id: String, approve: Bool) {
-        guard let i = actions.firstIndex(where: { $0.id == id && $0.state == "pending" }) else { return }
-        do {
-            if !approve { actions[i].state = "rejected"; try persist(); return }
-            guard UIApplication.shared.applicationState == .active else { throw PortalError.server("请回到应用前台执行。") }
-            try check(actions[i].tool, write: true)
-            guard Date().timeIntervalSince(actions[i].created) < 86400 else { actions[i].state = "expired"; try persist(); return }
-            let args = try JSONSerialization.jsonObject(with: actions[i].arguments) as? [String: Any] ?? [:]
-            if let preview = actions[i].preview, preview != (try native.preview(capability(actions[i].tool), args)) {
-                actions[i].state = "stale"; try persist()
-                throw PortalError.server("系统记录已变化，请让 Being 重新读取并提交新的操作。")
-            }
-            actions[i].state = "executing"; try persist()
-            let result = try native.write(capability(actions[i].tool), args)
-            actions[i].result = try JSONSerialization.data(withJSONObject: result)
-            actions[i].state = "completed"
-            do { try persist() } catch { actions[i].state = "unknown"; throw error }
-            record(actions[i].tool, "已完成")
-        } catch {
-            if actions[i].state == "executing" { actions[i].state = "unknown"; try? persist() }
-            notice = error is PortalError ? error.localizedDescription : "操作未确认完成，请检查系统记录。"
-            record(actions[i].tool, "未确认完成")
-        }
     }
     func setPhase(_ value: String) { phase = value }
     func suspend() {
@@ -240,15 +267,25 @@ struct IOSPortalActivity: Identifiable {
     }
     func resume() {
         refreshPermissions()
-        guard wanted, phase == "paused" else { return }; launch()
+        guard wanted else { return }
+        // A suspended socket can still look connected after iOS freezes it.
+        // Also bypass an old retry backoff when the user returns to the app.
+        if phase == "paused" || phase == "retrying" || runner == nil || Date().timeIntervalSince(lastSeen) > 45 { launch() }
     }
     func stop() { wanted = false; cancelSession(); phase = "stopped" }
     func cancelSession() {
         generation = UUID(); runner?.cancel(); runner = nil
         calls.values.forEach { $0.cancel() }; calls.removeAll()
+        interruptActivities()
         socket?.cancel(with: .goingAway, reason: nil); socket = nil
         session?.invalidateAndCancel(); session = nil
         native.cancelLocation()
+    }
+    func interruptActivities() {
+        if activity.contains(where: { $0.status == "执行中" }) {
+            for i in activity.indices where activity[i].status == "执行中" { activity[i].status = "已中断" }
+            saveActivity()
+        }
     }
     func start() {
         guard !wanted, connection != nil, storageReady else { notice = "请先连接 Being，并确认本地配置可用。"; return }

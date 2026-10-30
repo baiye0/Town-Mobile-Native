@@ -24,7 +24,22 @@ final class CompatibilityUITests: XCTestCase {
         start.tap()
         XCTAssertTrue(app.buttons["停止 Portal"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.textFields["portalName"].isEnabled)
+        // Exercise the actual SwiftUI scene edges, not just store methods.
+        // The HTTP fixture cannot accept a relay, so retrying is expected.
+        for _ in 0..<2 {
+            XCUIDevice.shared.press(.home)
+            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            app.activate()
+            let resumed = NSPredicate(format: "label == '正在连接' OR label == '连接中断，正在重试' OR label == '已连接'")
+            expectation(for: resumed, evaluatedWith: app.staticTexts["portalStatus"])
+            waitForExpectations(timeout: 8)
+            XCTAssertTrue(app.buttons["停止 Portal"].exists)
+        }
         app.buttons["停止 Portal"].tap()
+        XCTAssertEqual(app.staticTexts["portalStatus"].label, "尚未启动")
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        app.activate()
         XCTAssertEqual(app.staticTexts["portalStatus"].label, "尚未启动")
         let expand = app.buttons["portalPermissions"]
         for _ in 0..<3 where !expand.isHittable { app.swipeUp() }
@@ -308,6 +323,42 @@ final class CompatibilityUITests: XCTestCase {
         XCTAssertTrue(app.buttons["连接我的 Being"].waitForExistence(timeout: 5))
     }
 
+    func testFiresideUnreadBadgesAndIconNavigation() {
+        verifyFiresideUnreadBadges(glass: true)
+    }
+
+    func testFiresideUnreadBadgesAndPlainIconNavigation() {
+        verifyFiresideUnreadBadges(glass: false)
+    }
+
+    private func verifyFiresideUnreadBadges(glass: Bool) {
+        app.terminate()
+        app.launchArguments = ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN",
+                               "-glassEffects", glass ? "YES" : "NO", "--social-layout-fixture", "--social-unread-fixture"]
+        app.launch()
+        let firesides = glass ? app.tabBars.buttons["围炉"] : app.buttons["围炉"]
+        XCTAssertTrue(firesides.waitForExistence(timeout: 5))
+        firesides.tap()
+        let garden = app.staticTexts["firesideUnread-garden"]
+        let reading = app.staticTexts["firesideUnread-reading"]
+        XCTAssertTrue(garden.waitForExistence(timeout: 5))
+        XCTAssertTrue(reading.exists)
+        XCTAssertEqual(garden.label, "2 条未读消息")
+        XCTAssertFalse(app.staticTexts["firesideUnread-building"].exists)
+        capture(glass ? "fireside-unread-icons-glass" : "fireside-unread-icons-plain")
+        app.staticTexts["花园里的慢慢聊"].tap()
+        XCTAssertTrue(app.staticTexts["林间"].waitForExistence(timeout: 5))
+        if glass { app.navigationBars.buttons.firstMatch.tap() }
+        else { app.buttons["返回"].tap() }
+        XCTAssertTrue(reading.waitForExistence(timeout: 5))
+        XCTAssertFalse(garden.exists)
+        // Switching away and returning must retain the other room's badge.
+        (glass ? app.tabBars.buttons["私信"] : app.buttons["私信"]).tap()
+        firesides.tap()
+        XCTAssertTrue(reading.waitForExistence(timeout: 5))
+        capture(glass ? "fireside-unread-remaining-glass" : "fireside-unread-remaining-plain")
+    }
+
     func testSocialFeedLayoutAndFilters() {
         app.terminate()
         app.launchArguments += ["--social-layout-fixture"]
@@ -459,6 +510,60 @@ final class CompatibilityUITests: XCTestCase {
             wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: camera)], timeout: 5)
             XCTAssertTrue(app.buttons["展开资源库"].isHittable)
         }
+    }
+
+    func testTypingAndTabNavigationWithLongHistory() throws {
+        _ = try connectToFixture(historyCount: 1000)
+        XCTAssertTrue(app.staticTexts["Compatibility message 1000"].waitForExistence(timeout: 10))
+        let input = app.descendants(matching: .any).matching(identifier: "消息").firstMatch
+        let draft = "Long history draft\nSecond line stays editable"
+        input.tap(); input.typeText(draft)
+        XCTAssertEqual(input.value as? String, draft)
+        app.buttons["对话记录"].tap()
+        app.buttons["收起侧栏"].tap()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)], timeout: 5)
+        for _ in 0..<3 {
+            app.tabBars.buttons["更多"].tap()
+            XCTAssertTrue(app.navigationBars["更多"].waitForExistence(timeout: 5))
+            app.tabBars.buttons["对话"].tap()
+            XCTAssertTrue(input.waitForExistence(timeout: 5))
+            XCTAssertEqual(input.value as? String, draft)
+        }
+        input.tap(); input.typeText(" [edited]")
+        // A tap positions the native caret at the tapped glyph, not necessarily
+        // the end. Check one insertion and preservation of the entire draft.
+        let parts = (input.value as? String ?? "").components(separatedBy: " [edited]")
+        XCTAssertEqual(parts.count, 2)
+        XCTAssertEqual(parts.joined(), draft)
+        XCTAssertTrue(app.staticTexts["Compatibility message 1000"].isHittable)
+    }
+
+    func testScrollingLongHistoryWhileThinkingContinuously() throws {
+        app.launchArguments += ["--chat-performance-probe"]
+        let server = try connectToFixture(historyCount: 1000)
+        server.enableChat(staged: true)
+        XCTAssertTrue(app.staticTexts["Compatibility message 1000"].waitForExistence(timeout: 10))
+        let input = app.descendants(matching: .any).matching(identifier: "消息").firstMatch
+        input.tap(); input.typeText("Thinking scroll stress"); app.buttons["发送"].tap()
+        XCTAssertTrue(app.buttons["activeRunDetails"].waitForExistence(timeout: 10))
+        server.startThinkingFlood()
+        defer { server.stopThinkingFlood() }
+        let list = app.scrollViews["chatMessageList"]
+        for _ in 0..<5 { list.swipeDown() }
+        XCTAssertTrue(app.buttons["回到底部"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["Thinking scroll stress"].isHittable)
+        XCTAssertTrue(app.buttons["停止生成"].exists)
+        capture("thinking-long-history-scroll")
+        app.buttons["回到底部"].tap()
+        XCTAssertTrue(app.buttons["activeRunDetails"].waitForExistence(timeout: 5))
+        app.buttons["activeRunDetails"].tap()
+        XCTAssertTrue(app.scrollViews["runProcessScroll"].waitForExistence(timeout: 5))
+        app.buttons["activeRunDetails"].tap()
+        server.stopThinkingFlood()
+        server.appendReply("Stress test final reply.")
+        XCTAssertTrue(app.staticTexts["Stress test final reply."].waitForExistence(timeout: 5))
+        server.finishReply()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["停止生成"])], timeout: 10)
     }
 
     func testLiveProcessAndIncrementalReplyBeforeStreamCompletes() throws {
@@ -831,9 +936,9 @@ final class CompatibilityUITests: XCTestCase {
         wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["停止生成"])], timeout: 10)
     }
 
-    private func connectToFixture() throws -> LocalHistoryServer {
+    private func connectToFixture(historyCount: Int = 60) throws -> LocalHistoryServer {
         let ready = expectation(description: "Local history fixture is listening")
-        let server = try LocalHistoryServer(ready: ready)
+        let server = try LocalHistoryServer(ready: ready, historyCount: historyCount)
         self.server = server
         wait(for: [ready], timeout: 5)
         app.terminate()

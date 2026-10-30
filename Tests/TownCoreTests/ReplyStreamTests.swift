@@ -43,6 +43,15 @@ private func pending() -> PendingSend {
     #expect(ReplyStream.messages(entry).first?.process == nil)
 }
 
+@Test func emptyBubbleCheckpointDoesNotEraseFlattenedReply() {
+    var entry = pending()
+    entry.reply = "已经收到的内容"
+    entry.bubbles = []
+    ReplyStream.consume("thinking", ["text": "继续处理"], entry: &entry)
+    #expect(entry.reply == "已经收到的内容")
+    #expect(ReplyStream.messages(entry).map(\.text) == ["已经收到的内容"])
+}
+
 @Test func toolSeparatedSpeechSharesBubbleUntilMessageStop() {
     var entry = pending()
     ReplyStream.consume("content_block_delta", ["delta": ["text": "先检查。"]], entry: &entry)
@@ -131,6 +140,14 @@ private func pending() -> PendingSend {
     #expect(HistoryRules.merge(merged, [final])[0].text == "canonical")
 }
 
+@Test func emptyHistoryPlaceholderDoesNotEraseLocalReply() {
+    let local = Message(role: "being", text: "已经收到的内容", sceneID: "s", sequence: 12, streaming: true)
+    let empty = Message(role: "being", text: "", sceneID: "s", sequence: 12)
+    let merged = HistoryRules.merge([local], [empty])
+    #expect(merged.count == 1)
+    #expect(merged[0].text == "已经收到的内容")
+}
+
 @Test func finalQueueCommitCannotBeOverwrittenByAnOlderStreamCheckpoint() throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
     defer { try? FileManager.default.removeItem(at: url) }
@@ -156,4 +173,27 @@ private func pending() -> PendingSend {
     let confirmed = ReplyStream.bindHistory(rows, to: entry)
     #expect(confirmed.map(\.id) == ReplyStream.messages(entry).map(\.id))
     #expect(Set(confirmed.map(\.id)).count == 2)
+}
+
+@Test func partialHistoryCannotReplaceALaterReplyBubble() {
+    var entry = pending()
+    ReplyStream.consume("text", ["text": "First reply"], entry: &entry)
+    ReplyStream.consume("message_stop", [:], entry: &entry)
+    ReplyStream.consume("text", ["text": "Second reply with the result"], entry: &entry)
+    let finalID = entry.bubbles!.last!.id
+    let early = Message(role: "being", text: "First reply (persisted)", sceneID: "s", sequence: 12)
+    let bound = ReplyStream.bindHistory([early], to: entry)
+    #expect(bound[0].id != finalID)
+    #expect(ReplyStream.messages(entry).last?.text == "Second reply with the result")
+}
+
+@Test func completedStreamSurvivesStaleHistoryPrefixes() {
+    var entry = pending()
+    ReplyStream.consume("text", ["text": "first and final"], entry: &entry)
+    ReplyStream.finish(&entry)
+    let early = Message(role: "being", text: "first", sceneID: "s", sequence: 12)
+    let bound = ReplyStream.bindHistory([early], to: entry)
+    #expect(bound[0].id == entry.replyID)
+    #expect(bound[0].text == "first and final")
+    #expect(HistoryRules.merge(bound, [early])[0].text == "first and final")
 }
