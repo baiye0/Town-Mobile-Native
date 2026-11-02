@@ -1,3 +1,29 @@
+# 长回复阅读位置与打断提示（2026-11-02）
+
+- 对照 nanoMuse 的手势意图与阅读状态规则，Android 只在一次拖动/惯性滚动结束时判断是否恢复底部跟随；后续键盘或 Markdown 重排不能复用旧滚动方向。反向列表中正在阅读的可见气泡继续增高时，补偿其偏移，避免正文向上挤。
+- `breath interrupted` 历史标记改为“上一条回复已打断”；已落盘的旧 marker 文案同样迁移，普通聊天正文中的“已停止”保持原文。
+- 真实手机非 debuggable QA 包：生产 Town 界面，60 条历史，400 段合成回复共 19,247 字符；通过 Activity 输入分发注入上下滑动，配合 3 次真实 IME 开关。检查键盘关闭前后可见正文位置误差不超过 2 px，回复结束保留阅读位置，最终正文无缺失或重复。2,073 个流式帧，P95 29.57 ms，9 帧超过 50 ms；包含测试操作，不能据此保证所有机型稳定帧率。
+- 12 项实测 LazyColumn 回归通过，包括 12 次追加内容/视口变化保留历史 key 和 offset、取消手势、主动返回底部、可见长回复增高时保持正文位置。测试行高使用稳定消息顺序，避免追加数据改变历史行高而混淆偏移断言。
+- 证据：`artifacts/chat-scroll-intent-20261102/`。组合入口：`ChatRenderingInstrumentation -e scrolling true`；滚动入口：`ChatScrollInstrumentation -e reverse true`，沿用下文隔离 Release 构建参数。
+# Android 气泡顺序与刷新抖动复查（2026-11-02）
+
+- 复查范围：本轮 Android 聊天改动，包含历史合并与排序、发送恢复、流式状态投影、Markdown 分段、LazyColumn 与滚动协调、输入栏和 Insets、顶部反馈及 QA 构建隔离。没有将此结论扩大为未运行的 iOS 或所有外部服务验收。
+- 实际复现两个顺序缺陷：反向 LazyColumn 的单个 item 发出多个根布局，等待气泡被排到发送文字之上；缺序号的旧缓存作为前驱时，先收到服务端序号的回复能排到未确认的提问之前。前者用单根 Column 保持时间戳、提问、等待/思考的内部顺序；后者按明确的同场景因果链定位到已确认后继之前，保留确认消息的序号顺序。
+- 历史加载指示从底部移到顶部固定大小的刷新按钮；同步、回复和错误共用固定高度状态区，错误可点开全文。发送/恢复错误也不再向输入栏插入额外一行；刷新失败使用独立状态。空页不修改正文列表，刷新状态变化不改变列表或输入栏高度。
+- 对照 nanoMuse 的反向列表跟随方式，移除反向列表随长回复高度进入/退出顶部锚定的逻辑。分段从自然边界逐步追加，回复气泡始终保持同一宽度，避免到 3,000 字后才切换宽度与渲染结构。保留手动阅读历史、索引定位及回到底部。
+- 新增测试先在旧实现失败：真实手机等待气泡矩形 `y=1766..1826`，发送文字 `y=1898..1973`；排序单测实际为 `reply, old, prompt`。修正后 `ChatRenderingInstrumentation -e ordering true` 验证时间戳在提问上方、等待与最终回复在提问下方；空页刷新与 HTTP 503 错误发生前后，发送文字矩形完全不变，错误仅出现在顶部。
+- 最终 19,247 字符 / 400 分片 Release 真机测试无缺片、重复或崩溃，三轮真实 IME 开合通过；1,112 个流式采样帧 P95 33.90 ms，14 帧 >50 ms（包含键盘和测试驱动，排除截图时段）。仍不把压力测试通过等同于所有场景恒定帧率。8 项反向滚动、发送队列与新进程冷恢复回归通过。截图和原始指标：`artifacts/chat-order-review-20261102/`。
+
+# Android 真机流式渲染与键盘（2026-11-02）
+
+- 根据用户真机反馈，Android 流式文字改用行级状态；完整快照仍记录最新文字，首次可见文字、历史确认和结束状态才更新列表结构。Markdown 解析移出主线程，已完成块复用，显示更新按正文长度合并为 50–120 ms，首包和完成时立即提交。
+- 长正文按完整 Markdown 边界拆成 LazyColumn 项，保留连贯的气泡形状和全文复制/引用/分享；代码围栏和表格不在中间拆开。附件、图片和交互 UI 保留原渲染路径。反向列表原生保持底部，阅读历史不强制跟随；键盘 Insets 在外层统一处理，导航高度随键盘连续收起，发送不再主动关闭键盘。
+- 参考 nanoMuse `b3bf3e940078c735fb9916e8c5ce539a87993e25` 的 [ChatScreen](https://github.com/nano-muse/nanoMuse/blob/b3bf3e940078c735fb9916e8c5ce539a87993e25/android/src/android/app/src/main/java/com/openminis/app/ui/chat/ChatScreen.kt)、[ChatFlatItems](https://github.com/nano-muse/nanoMuse/blob/b3bf3e940078c735fb9916e8c5ce539a87993e25/android/src/android/app/src/main/java/com/openminis/app/ui/chat/ChatFlatItems.kt) 与 [StreamingMarkdownText](https://github.com/nano-muse/nanoMuse/blob/b3bf3e940078c735fb9916e8c5ce539a87993e25/android/src/android/app/src/main/java/com/openminis/app/ui/chat/StreamingMarkdownText.kt)，独立实现行更新、分段与底部跟随，不照搬其完整渲染器。
+- 手机 `24115RA8EC` 上隔离 QA Release 包（不可调试、HTTP 全部本地拦截）运行真实 Town/Chat/Composer：60 条历史，普通回复 160 分片 / 2,084 字符及长回复 400 分片 / 19,247 字符（标题、列表、代码、表格）。每次均在流式回复期间操作真实输入法开合三轮，最终正文逐字核对，无缺片或重复。
+- 最终普通回复：718 个流式采样帧，FrameMetrics TOTAL_DURATION P95 23.68 ms，2 帧 >50 ms；长回复：1,118 帧，P95 35.26 ms，7 帧 >50 ms。采样排除截图区间，但包含输入法动画和测试驱动开销；没有旧版同条件基线，不能据此承诺所有设备稳定 60/120 FPS。超长单个代码块/无段落正文、真实网络与远程图片仍需单独评估。
+- 反向列表 8 项真机滚动场景通过；发送队列恢复、停止、优先发送、`[DONE]` 与 force-stop 后冷恢复回归通过。测试隔离于正式包，没有向用户真实对话发送消息。
+- 可复测命令：`gradlew -p android :app:assembleRelease :app:assembleReleaseAndroidTest -PportalQa=true -PchatRenderBenchmark=true -PtestRunner=town.nativeapp.ChatRenderingInstrumentation`，安装 QA 应用及 AndroidTest APK，运行 `am instrument -w town.beings.nativeapp.portalqa.test/town.nativeapp.ChatRenderingInstrumentation`；长回复追加 `-e long true`。性能入口必须指定 `portalQa`，正常 Release 不包含测试 Activity。截图与原始指标位于 `artifacts/chat-polish-20261102/`。
+
 # 对话恢复：无活动回复但队列不前进（2026-11-02）
 
 - 发现：停止时按场景找第一条非排队消息，可能把较早的失败记录标记为停止，让实际发送项留在盘上。与 iOS 一样，旧调度器只在前台恢复的第一轮允许处理 `sending/waiting`；第二条遗留记录会阻断后续发送。Android 原有优先发送也在取消 worker 后才调整顺序，此时下一条可能已发出。

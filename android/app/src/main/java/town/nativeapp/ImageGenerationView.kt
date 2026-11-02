@@ -24,7 +24,7 @@ import org.json.JSONObject
     val seen = mutableSetOf<String>()
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         parts.forEachIndexed { index, part ->
-            if (!part.receipt) MarkdownText(part.text, textColor = color, imageReferences = definitions)
+            if (!part.receipt) MarkdownText(part.text, textColor = color, imageReferences = definitions, streaming = message.streaming == true)
             else if (message.streaming == true) Text("正在接收图片任务回执…", color = color)
             else {
                 val receipt = remember(part.text) { ImageGeneration.parse(part.text) }

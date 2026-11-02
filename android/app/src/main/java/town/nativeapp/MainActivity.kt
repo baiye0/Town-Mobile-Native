@@ -81,7 +81,6 @@ class MainActivity : ComponentActivity() {
     LaunchedEffect(m.connection,m.selected){m.showSBS=m.getSBSVisibility()}
     SideEffect { m.chatVisible = screen == "chat" }
     LaunchedEffect(CompletionNotifications.pendingScene,CompletionNotifications.pendingEndpoint,m.connection?.endpoint){if(CompletionNotifications.pendingEndpoint==m.connection?.endpoint)CompletionNotifications.pendingScene?.let{m.selectScene(it);nav.screen="chat";CompletionNotifications.pendingScene=null}}
-    val keyboard = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     LifecycleResumeEffect(social.identity?.id) { m.appActive=true; m.history(); m.resumeDelivery(); if(CompletionNotifications.pendingEndpoint==m.connection?.endpoint)CompletionNotifications.pendingScene?.let{m.selectScene(it);nav.screen="chat";CompletionNotifications.pendingScene=null}; social.startLive(); onPauseOrDispose { m.appActive=false; social.stopLive() } }
     BackHandler(drawer.isOpen || nav.canBack) { if (drawer.isOpen) scope.launch { drawer.close() } else nav.back() }
     ModalNavigationDrawer(drawerState = drawer, gesturesEnabled = (screen == "chat" || drawer.isOpen), drawerContent = {
@@ -110,22 +109,28 @@ class MainActivity : ComponentActivity() {
             HorizontalDivider(); ListItem(headlineContent={Text(m.connection?.being ?: "未连接",maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},leadingContent={Icon(Icons.Outlined.AccountCircle,null)},trailingContent={ActionIcon(AppIcons.Settings,"设置"){nav.screen="more";scope.launch{drawer.close()}}})
         }
     }) {
-        Scaffold(topBar={Column { CenterAlignedTopAppBar(
-            title={if(screen=="chat") Column(Modifier.clickable{nav.screen="conversation-settings"},horizontalAlignment=Alignment.CenterHorizontally){Text(m.current?.title ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis);if(m.connection!=null)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(4.dp)){SBSStatusDot(m.sbsEnabled==true,m.sbsActivity.isNotEmpty());Text(m.sbsStatus,fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)}} else Text(destinations.find{it.id==screen}?.title ?: mapOf("more" to "设置与小镇","connection" to "连接 Being","pair" to "小镇连接","models" to "模型设置","portal" to "本机 Portal","navigation" to "底部导航","conversation-settings" to "对话设置","notification-settings" to "通知设置","appearance" to "外观","updates" to "应用更新","queue" to "发送队列")[screen] ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},
+        Scaffold(modifier=Modifier.imePadding(),
+            contentWindowInsets=WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+            topBar={Column { CenterAlignedTopAppBar(
+            title={if(screen=="chat") ChatHeader(m){nav.screen="conversation-settings"} else Text(destinations.find{it.id==screen}?.title ?: mapOf("more" to "设置与小镇","connection" to "连接 Being","pair" to "小镇连接","models" to "模型设置","portal" to "本机 Portal","navigation" to "底部导航","conversation-settings" to "对话设置","notification-settings" to "通知设置","appearance" to "外观","updates" to "应用更新","queue" to "发送队列")[screen] ?: "Being",fontWeight=FontWeight.Medium,fontSize=19.sp,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)},
             navigationIcon={IconButton(onClick={if(screen in nav.tabs+"more")scope.launch{drawer.open()} else nav.back()}){Icon(if(screen in nav.tabs+"more")Icons.Outlined.Menu else Icons.AutoMirrored.Outlined.ArrowBack,"侧栏或返回")}},
             actions={if(screen=="chat") {
                 ActionIcon(AppIcons.List,"提问索引",m.displayMessages.any{it.role=="user"}) { showQuestionIndex=true }
-                ActionIcon(Icons.Outlined.Refresh,"刷新",!m.historyLoading&&m.connection!=null) { m.history() }
+                ChatRefreshAction(m)
             }},
             colors=TopAppBarDefaults.topAppBarColors(containerColor=MaterialTheme.colorScheme.background))
             }},
-            bottomBar={Column{
+            bottomBar={Column(Modifier.navigationBarsPadding()){
                 if(screen=="chat"){Composer(m,onFocus={inputFocused=it}){nav.screen="connection"}}
-                if(!keyboard && screen in nav.tabs+"more")NavigationBar {
+                if(screen in nav.tabs+"more")NavigationBar(
+                    modifier=Modifier.collapseWithKeyboard(),
+                    windowInsets=WindowInsets(0,0,0,0),
+                    containerColor=MaterialTheme.colorScheme.background,
+                    tonalElevation=0.dp) {
                     (nav.tabs+"more").forEach { id -> NavigationBarItem(selected=screen==id,onClick={nav.screen=id},icon={BadgedBox(badge={val n=social.unread[id] ?: 0;if(n>0)Badge{Text(if(n>99)"99+" else "$n")}}){Icon(destinationIcon(id),destinations.find{it.id==id}?.title ?: "更多")}}) }
                 }
             }}
-        ) { padding -> Box(Modifier.fillMaxSize().padding(padding)) {
+        ) { padding -> Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             EdgeNavigation(nav.canBack && screen != "chat",nav.canForward,{nav.back()},{nav.forward()}) {
             when(screen) {
                 "chat" -> Chat(m,showQuestionIndex,{showQuestionIndex=false},inputFocused){nav.screen="connection"}
@@ -152,10 +157,13 @@ class MainActivity : ComponentActivity() {
 @Composable fun Chat(m: TownModel, showIndex:Boolean=false, closeIndex:()->Unit={}, inputFocused:Boolean=false, connect:()->Unit) {
     LaunchedEffect(m.connection?.endpoint){m.history()}
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    val messages = m.displayMessages
-    val scroll = key(m.connection?.endpoint,m.selected,m.showAllScenes){rememberChatScrollController()}
+    val rowProjector=remember(m){ChatDisplayRows()}
+    val displayRows by remember(m) { derivedStateOf { rowProjector.render(m.displayMessages,m::displayedMessage) } }
+    val messages=remember(displayRows){displayRows.map{it.message}}
+    val activeReply=displayRows.lastOrNull{it.source.id==m.streamingReplyID}?.message?.id ?: m.streamingReplyID
+    val scroll = key(m.connection?.endpoint,m.selected,m.showAllScenes){rememberChatScrollController(reversed=true)}
     val state = scroll.list
-    ChatScrollEffects(scroll,messages,m.streamingReplyID,inputFocused,m.submittedMessageID){focus.clearFocus()}
+    ChatScrollEffects(scroll,messages,activeReply,inputFocused,m.submittedMessageID){focus.clearFocus()}
     if (messages.isEmpty()) {
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 28.dp).padding(top = 42.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
             Box(Modifier.size(100.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), CircleShape), contentAlignment = Alignment.Center) { Image(painterResource(R.drawable.client_logo), "Being", Modifier.size(100.dp).clip(RoundedCornerShape(24.dp))) }
@@ -165,17 +173,26 @@ class MainActivity : ComponentActivity() {
         }
     } else {
         Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = state,modifier=Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }, contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            itemsIndexed(messages, key = { _, message -> message.id }) { index,message ->
-                message.timestamp?.let{time->if(index==0||messages[index-1].timestamp?.take(16)!=time.take(16))Text(chatTime(time),Modifier.fillMaxWidth().padding(vertical=4.dp),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,textAlign=androidx.compose.ui.text.style.TextAlign.Center)}
+        LazyColumn(state = state,reverseLayout=true,modifier=Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { focus.clearFocus() } }, contentPadding = PaddingValues(horizontal=16.dp,vertical=20.dp), verticalArrangement = Arrangement.Bottom) {
+            item(key=CHAT_BOTTOM_KEY) {
+                Spacer(Modifier.height(1.dp))
+            }
+            itemsIndexed(displayRows.asReversed(), key = { _, row -> row.message.id },contentType={_, row -> row.message.role}) { reverseIndex,row ->
+                val index=messages.lastIndex-reverseIndex
+                val message = if(row.segmented)row.message else m.displayedMessage(row.message)
+                // reverseLayout reverses sibling placeables inside a lazy item too.
+                // A single Column preserves timestamp -> prompt -> waiting/reasoning order.
+                Column(Modifier.fillMaxWidth()) {
+                if(row.first)Spacer(Modifier.height(16.dp))
+                if(row.first)message.timestamp?.let{time->if(index==0||messages[index-1].timestamp?.take(16)!=time.take(16))Text(chatTime(time),Modifier.fillMaxWidth().padding(vertical=4.dp),fontSize=11.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,textAlign=androidx.compose.ui.text.style.TextAlign.Center)}
                 if(message.kind=="marker"){Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){HorizontalDivider(Modifier.weight(1f));Text(message.text,Modifier.padding(horizontal=8.dp),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant);HorizontalDivider(Modifier.weight(1f))}}
                 else {
                 val user = message.role == "user"
-                Row(Modifier.fillMaxWidth().padding(start=if(user)16.dp else 0.dp,end=if(user)0.dp else 24.dp), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().padding(start=if(user)36.dp else 0.dp,end=if(user)0.dp else 20.dp), horizontalArrangement = if (user) Arrangement.End else Arrangement.Start, verticalAlignment = Alignment.CenterVertically) {
                     val hasAttachment = user && (message.files?.isNotEmpty() == true || message.text.contains("[attachment-message:v1:"))
                     val originalText = MessagePresentation.body(message)
                     if(user)DeliveryStatusView(message,m)
-                    MessageActions(originalText,onQuote={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+it},modifier=Modifier.weight(1f,fill=false)) {
+                    MessageActions(originalText,onQuote={m.draft+=(if(m.draft.isEmpty())"" else "\n\n")+it},modifier=Modifier.weight(1f,fill=!user),textProvider={MessagePresentation.body(m.displayedMessage(row.source))}) {
                     Column(Modifier.widthIn(max=if(user)310.dp else 580.dp),horizontalAlignment=if(user)Alignment.End else Alignment.Start) {
                     if (hasAttachment) {
                         Column(Modifier.wrapContentWidth().widthIn(max = 310.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -186,17 +203,20 @@ class MainActivity : ComponentActivity() {
                             }
                             if (originalText.isNotBlank()) {
                                 Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.chatBubble(true), RoundedCornerShape(22.dp)).padding(horizontal = 16.dp, vertical = 12.dp)) {
-                                    MarkdownText(originalText, textColor=Color.White)
+                                    MarkdownText(originalText, textColor=MaterialTheme.colorScheme.onSurface)
                                 }
                             }
                         }
                     } else {
-                        Column(Modifier.wrapContentWidth().widthIn(max = if (user) 310.dp else 580.dp).background(MaterialTheme.colorScheme.chatBubble(user), RoundedCornerShape(22.dp)).padding(16.dp)) {
+                        Column((if(!user)Modifier.fillMaxWidth() else Modifier.wrapContentWidth()).widthIn(max = if (user) 340.dp else 580.dp).background(MaterialTheme.colorScheme.chatBubble(user), RoundedCornerShape(topStart=if(row.first)20.dp else 0.dp,topEnd=if(row.first)20.dp else 0.dp,bottomEnd=if(!row.last)0.dp else if(user)6.dp else 20.dp,bottomStart=if(!row.last)0.dp else if(user)20.dp else 6.dp)).padding(horizontal=16.dp).padding(top=if(row.first)12.dp else 4.dp,bottom=if(row.last)12.dp else 4.dp)) {
                             val isGlobalBeingMessage = message.sceneID == null && message.role == "being" && message.kind == null
-                            if((m.showAllScenes&&message.sceneID!=m.selected)||isGlobalBeingMessage)Text(if(isGlobalBeingMessage) "全局消息" else (message.sceneLabel ?: message.sceneID ?: m.sceneName(message)),fontSize=12.sp,color=if(user)Color.White else MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            if(row.first&&((m.showAllScenes&&message.sceneID!=m.selected)||isGlobalBeingMessage))Text(if(isGlobalBeingMessage) "全局消息" else (message.sceneLabel ?: message.sceneID ?: m.sceneName(message)),fontSize=12.sp,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                             // AttachmentMessageView intentionally omits user text: render the prompt here,
                             // just as the attachment branch does, before its secondary actions/status.
-                            if(user) UserMessageBody(message) else AttachmentMessageView(message,m,MaterialTheme.colorScheme.onSurface)
+                            if(user) UserMessageBody(message)
+                            else if(row.segmented)MarkdownText(message.text,streaming=message.streaming==true)
+                            else AttachmentMessageView(message,m,MaterialTheme.colorScheme.onSurface)
+                            if(row.segmented&&row.last&&m.showThinking&&!row.source.process.isNullOrBlank())ChatRunView(row.source.process,"",false)
                         }
                     }
                     }
@@ -214,13 +234,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 }
-            }
-            item(key=CHAT_BOTTOM_KEY) {
-                if(m.historyLoading)CircularProgressIndicator(Modifier.size(20.dp),strokeWidth=2.dp)
-                Spacer(Modifier.height(1.dp))
+                }
             }
         }
-        if(state.canScrollForward)SmallFloatingActionButton(onClick={scroll.bottom()},modifier=Modifier.align(Alignment.BottomEnd).padding(16.dp),containerColor=MaterialTheme.colorScheme.surface){Icon(Icons.Outlined.ArrowDownward,"回到底部")}
+        val showBottom by remember { derivedStateOf { state.canScrollBackward } }
+        if(showBottom)SmallFloatingActionButton(onClick={scroll.bottom()},modifier=Modifier.align(Alignment.BottomEnd).padding(16.dp),containerColor=MaterialTheme.colorScheme.surface){Icon(Icons.Outlined.ArrowDownward,"回到底部")}
         }
     }
     if(showIndex)QuestionIndexSheet(messages,onDismiss=closeIndex){index->scroll.message(messages[index].id);closeIndex()}
@@ -236,38 +254,36 @@ class MainActivity : ComponentActivity() {
             result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.takeIf{it.isNotBlank()}?.let{m.draft=m.draft+(if(m.draft.isEmpty())"" else " ")+it}
         }
     }
-    Column(Modifier.imePadding().padding(horizontal = 16.dp).padding(top = 12.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        m.notice?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 8.dp)) }
+    Column(Modifier.padding(horizontal = 12.dp).padding(top = 8.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Surface(
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(26.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
             contentColor = MaterialTheme.colorScheme.onSurface,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha=.6f)),
             tonalElevation = 0.dp,
             shadowElevation = 0.dp
         ) {
             Column(Modifier.fillMaxWidth()) {
                 AttachmentPreviewStrip(m)
-                Row(Modifier.fillMaxWidth().heightIn(min=48.dp).padding(horizontal=4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().heightIn(min=52.dp).padding(horizontal=4.dp), verticalAlignment = Alignment.Bottom) {
                     IconButton(onClick={actionsExpanded=!actionsExpanded},modifier=Modifier.size(44.dp)){Icon(if(actionsExpanded) Icons.Outlined.Close else Icons.Outlined.Add,"资源库")}
                     androidx.compose.foundation.text.BasicTextField(
-                        value=m.draft,onValueChange={m.draft=it},modifier=Modifier.weight(1f).onFocusChanged{onFocus(it.isFocused)}.padding(start=12.dp,end=4.dp),maxLines=6,
-                        textStyle=androidx.compose.ui.text.TextStyle(fontSize=16.sp,color=MaterialTheme.colorScheme.onSurface),
+                        value=m.draft,onValueChange={m.draft=it},modifier=Modifier.weight(1f).onFocusChanged{onFocus(it.isFocused)}.padding(start=4.dp,end=8.dp),maxLines=5,
+                        textStyle=androidx.compose.ui.text.TextStyle(fontSize=16.sp,lineHeight=24.sp,color=MaterialTheme.colorScheme.onSurface),
                         cursorBrush=androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-                        decorationBox={inner->Box(Modifier.padding(vertical=8.dp)){if(m.draft.isEmpty())Text("说点什么…",fontSize=16.sp,color=MaterialTheme.colorScheme.onSurfaceVariant);inner()}}
+                        decorationBox={inner->Box(Modifier.padding(vertical=14.dp)){if(m.draft.isEmpty())Text("发消息…",fontSize=16.sp,color=MaterialTheme.colorScheme.onSurfaceVariant);inner()}}
                     )
-                    IconButton(onClick={
+                    val hasDraft = m.draft.isNotBlank() || m.attachments.isNotEmpty()
+                    if (!hasDraft && !m.busy && m.connection!=null) IconButton(onClick={
                         focus.clearFocus()
                         voiceScene=m.selected;voiceEndpoint=m.connection?.endpoint
                         try{voice.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply{putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);putExtra(RecognizerIntent.EXTRA_LANGUAGE,java.util.Locale.getDefault().toLanguageTag())})}catch(_:android.content.ActivityNotFoundException){m.notice="系统语音识别暂不可用。"}
                     },enabled=!m.busy,modifier=Modifier.size(44.dp)){Icon(Icons.Outlined.Mic,"语音输入",tint=MaterialTheme.colorScheme.onSurfaceVariant)}
-                    val hasDraft = m.draft.isNotBlank() || m.attachments.isNotEmpty()
                     val canInterrupt = m.canInterrupt(m.selected)
-                    if (hasDraft && canInterrupt) TextButton(onClick={focus.clearFocus();m.send()}) { Text("排队") }
+                    if (hasDraft && canInterrupt) TextButton(onClick={m.send()}) { Text("排队") }
                     if (m.busy || m.connection == null || hasDraft) {
                         val stop = m.busy && !hasDraft
                         FilledIconButton(onClick = {
-                            focus.clearFocus()
                             when { m.connection == null -> connect(); stop -> m.stop(); else -> m.send(interrupt=true) }
                         },modifier=Modifier.size(44.dp)) {
                             Icon(if(stop) Icons.Outlined.Stop else if(m.connection==null) Icons.Outlined.Link else Icons.Outlined.ArrowUpward,

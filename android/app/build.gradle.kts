@@ -4,6 +4,10 @@ plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id(
 val appVersion = Properties().apply {
     rootProject.file("version.properties").inputStream().use { load(it) }
 }
+val chatRenderBenchmark = providers.gradleProperty("chatRenderBenchmark").orNull == "true"
+require(!chatRenderBenchmark || providers.gradleProperty("portalQa").orNull == "true") {
+    "Chat render benchmarks must use the isolated portalQa application"
+}
 android {
     namespace = "town.nativeapp"
     compileSdk = 36
@@ -22,6 +26,12 @@ android {
     if (providers.gradleProperty("portalQa").orNull == "true") {
         defaultConfig.applicationId = "town.beings.nativeapp.portalqa"
         defaultConfig.manifestPlaceholders["appLabel"] = "Being Portal QA"
+    }
+    if (chatRenderBenchmark) {
+        testBuildType = "release"
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("debug")
+        sourceSets.getByName("release").java.srcDir("src/debug/java")
+        sourceSets.getByName("release").manifest.srcFile("src/debug/AndroidManifest.xml")
     }
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

@@ -28,13 +28,14 @@ import kotlinx.coroutines.launch
 
 @Composable fun UserMessageBody(message:Message) {
     val body = MessagePresentation.body(message)
-    if(body.isNotBlank())MarkdownText(body,textColor=Color.White)
+    if(body.isNotBlank())MarkdownText(body,textColor=MaterialTheme.colorScheme.onSurface)
 }
 
 val LocalMessageContextMenu = staticCompositionLocalOf { false }
 
-@Composable fun MessageActions(text:String,onQuote:(String)->Unit,modifier:Modifier=Modifier,content:@Composable ()->Unit) {
+@Composable fun MessageActions(text:String,onQuote:(String)->Unit,modifier:Modifier=Modifier,textProvider:()->String={text},content:@Composable ()->Unit) {
     var expanded by remember { mutableStateOf(false) }
+    val actionText=if(expanded)textProvider() else text
     val clipboard=LocalClipboard.current
     val scope=rememberCoroutineScope()
     val context=LocalContext.current
@@ -42,16 +43,16 @@ val LocalMessageContextMenu = staticCompositionLocalOf { false }
     Box(modifier.combinedClickable(onClick={focus.clearFocus()},onLongClickLabel="消息操作",onLongClick={expanded=true})) {
         CompositionLocalProvider(LocalMessageContextMenu provides true,content=content)
         DropdownMenu(expanded,onDismissRequest={expanded=false}) {
-            DropdownMenuItem(text={Text("复制")},enabled=text.isNotBlank(),leadingIcon={Icon(Icons.Outlined.ContentCopy,null)},onClick={
+            DropdownMenuItem(text={Text("复制")},enabled=actionText.isNotBlank(),leadingIcon={Icon(Icons.Outlined.ContentCopy,null)},onClick={
                 expanded=false
-                scope.launch { clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("消息正文",text))) }
+                scope.launch { clipboard.setClipEntry(ClipEntry(android.content.ClipData.newPlainText("消息正文",actionText))) }
             })
-            DropdownMenuItem(text={Text("引用到草稿")},enabled=text.isNotBlank(),leadingIcon={Icon(AppIcons.Quote,null)},onClick={
-                expanded=false;onQuote(text.lines().joinToString("\n") { "> $it" })
+            DropdownMenuItem(text={Text("引用到草稿")},enabled=actionText.isNotBlank(),leadingIcon={Icon(AppIcons.Quote,null)},onClick={
+                expanded=false;onQuote(actionText.lines().joinToString("\n") { "> $it" })
             })
-            DropdownMenuItem(text={Text("分享")},enabled=text.isNotBlank(),leadingIcon={Icon(Icons.Outlined.Share,null)},onClick={
+            DropdownMenuItem(text={Text("分享")},enabled=actionText.isNotBlank(),leadingIcon={Icon(Icons.Outlined.Share,null)},onClick={
                 expanded=false
-                context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).apply{type="text/plain";putExtra(android.content.Intent.EXTRA_TEXT,text)},"分享消息"))
+                context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).apply{type="text/plain";putExtra(android.content.Intent.EXTRA_TEXT,actionText)},"分享消息"))
             })
         }
     }

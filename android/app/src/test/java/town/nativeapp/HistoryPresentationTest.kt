@@ -30,11 +30,14 @@ class HistoryPresentationTest {
     }
 
     @Test fun localCachePreservesPresentationMetadata() {
-        val message=Message("being","已停止","scene",7,"marker","2026-10-14T10:30:00Z","主对话")
+        val message=Message("being","上一条回复已打断","scene",7,"marker","2026-10-14T10:30:00Z","主对话")
         assertEquals(message,HistoryRules.decodeLocal(HistoryRules.encodeLocal(message)))
         val legacy=HistoryRules.decodeLocal(JSONObject("""{"role":"being","text":"partial"}"""))
         assertEquals("being",legacy.role);assertEquals("partial",legacy.text);assertTrue(legacy.id.isNotBlank())
         assertEquals(legacy.id,HistoryRules.decodeLocal(HistoryRules.encodeLocal(legacy)).id)
+        assertEquals(message,HistoryRules.decodeLocal(HistoryRules.encodeLocal(message.copy(text="已停止"))))
+        val ordinary=Message("being","已停止")
+        assertEquals(ordinary,HistoryRules.decodeLocal(HistoryRules.encodeLocal(ordinary)))
     }
 
     @Test fun dropsEmptyReplyPlaceholdersWithoutDroppingPartialText() {
@@ -51,7 +54,7 @@ class HistoryPresentationTest {
     }
     @Test fun keepsServerRolesMarkersAndUnscopedContent(){
         val message=HistoryRules.decode(JSONObject("""{"role":"self","content":"reply","seq":1}"""));assertEquals("being",message.role);assertNull(message.sceneID)
-        val marker=HistoryRules.decode(JSONObject("""{"from":"system","content":"[breath interrupted]","seq":2}"""));assertEquals("marker",marker.kind);assertEquals("已停止",marker.text)
+        val marker=HistoryRules.decode(JSONObject("""{"from":"system","content":"[breath interrupted]","seq":2}"""));assertEquals("marker",marker.kind);assertEquals("上一条回复已打断",marker.text)
     }
     @Test fun markdownRetainsFencedCodeTablesAndLists(){
         val blocks=MarkdownBlocks.parse("# 标题\n\n```swift\nlet x = 1\n```\n\n| 名称 | 内容 |\n| --- | --- |\n| A | `a|b` |\n\n- [x] 完成")

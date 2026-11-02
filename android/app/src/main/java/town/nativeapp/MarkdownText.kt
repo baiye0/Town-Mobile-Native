@@ -17,24 +17,43 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-private fun inlineText(value:String)=buildAnnotatedString {
-    val pattern=Regex("""\*\*(.+?)\*\*|`([^`]+)`|\[([^]]+)\]\((https?://[^ )]+)\)""")
+private val inlinePattern=Regex("""\*\*(.+?)\*\*|`([^`]+)`|\[([^]]+)\]\((https?://[^ )]+)\)""")
+@Composable private fun inlineText(value:String):AnnotatedString = remember(value) { buildAnnotatedString {
     var last=0
-    pattern.findAll(value).forEach{m->
+    inlinePattern.findAll(value).forEach{m->
         append(value.substring(last,m.range.first))
         when{m.groups[1]!=null->withStyle(SpanStyle(fontWeight=FontWeight.Bold)){append(m.groupValues[1])}
             m.groups[2]!=null->withStyle(SpanStyle(fontFamily=FontFamily.Monospace)){append(m.groupValues[2])}
             else->{pushLink(androidx.compose.ui.text.LinkAnnotation.Url(m.groupValues[4]));append(m.groupValues[3]);pop()}}
         last=m.range.last+1
     };append(value.substring(last))
-}
-@Composable fun MarkdownText(text:String,previewMarkdownCode:Boolean=true,textColor:androidx.compose.ui.graphics.Color=MaterialTheme.colorScheme.onSurface,imageReferences:String=""){
+} }
+@Composable fun MarkdownText(text:String,previewMarkdownCode:Boolean=true,textColor:androidx.compose.ui.graphics.Color=MaterialTheme.colorScheme.onSurface,imageReferences:String="",streaming:Boolean=false){
     val size=readingSize()
-    val clipboard=LocalClipboardManager.current
-    val blocks=androidx.compose.runtime.remember(text,imageReferences){MarkdownBlocks.parse(text,imageReferences)}
+    val blocks = if (streaming) {
+        val initial = remember { MarkdownBlocks.parse(text,imageReferences) }
+        val parsed by produceState(initial,text,imageReferences) {
+            val previous=value
+            value = withContext(Dispatchers.Default) {
+                MarkdownBlocks.parse(text,imageReferences).mapIndexed { index, block ->
+                    previous.getOrNull(index)?.takeIf { it == block } ?: block
+                }
+            }
+        }
+        parsed
+    } else remember(text,imageReferences) { MarkdownBlocks.parse(text,imageReferences) }
     Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-        blocks.forEach{b->when(b.kind){
+        blocks.forEach { block -> MarkdownBlockView(block,size,textColor,previewMarkdownCode) }
+    }
+}
+
+// Completed blocks keep their object identity between frames, so strong skipping
+// leaves their text, links, selection and code previews out of the live tail's work.
+@Composable private fun MarkdownBlockView(b:MarkdownBlock,size:Float,textColor:androidx.compose.ui.graphics.Color,previewMarkdownCode:Boolean) {
+        when(b.kind){
             "image"->RemoteImage(ChatImage(b.text,b.label))
             "rule"->HorizontalDivider()
             "code"->if(b.label.lowercase()=="intelligent-ui")NativeUIView(b.text) else NativeCodeBlock(b.text,b.label,previewMarkdownCode)
@@ -44,8 +63,7 @@ private fun inlineText(value:String)=buildAnnotatedString {
             "list"->Row(Modifier.padding(start=(b.level*16).dp)){Text(b.label,Modifier.width(24.dp),color=textColor);MarkdownSelection{Text(inlineText(b.text),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor)}}
             "quote"->Row{Box(Modifier.width(3.dp).heightIn(min=28.dp).background(MaterialTheme.colorScheme.outline));MarkdownSelection{Text(inlineText(b.text),Modifier.padding(start=12.dp),fontSize=size.sp,lineHeight=(size+9).sp,color=textColor.copy(alpha=0.8f))}}
             else->MarkdownSelection{Text(inlineText(b.text),color=textColor,fontSize=(if(b.kind=="heading")when(b.level){1->size+4;2->size+2;else->size}else size).sp,fontWeight=if(b.kind=="heading")FontWeight.SemiBold else FontWeight.Normal,lineHeight=(size+9).sp)}
-        }}
-    }
+        }
 }
 
 @Composable private fun MarkdownSelection(content:@Composable ()->Unit) {

@@ -26,7 +26,11 @@ class TownModel internal constructor(app: Application, private val client: OkHtt
         .connectTimeout(30, TimeUnit.SECONDS).readTimeout(90, TimeUnit.SECONDS).build())
     private val vault = Vault(app)
     var connection by mutableStateOf(vault.load()?.let { runCatching { Connection.parse(it) }.getOrNull() }); private set
-    var rooms by mutableStateOf<List<Room>>(emptyList()); private set
+    private val conversationRows = LiveConversationStore()
+    var rooms: List<Room>
+        get() = conversationRows.rooms
+        private set(value) { conversationRows.rooms = value }
+    fun displayedMessage(message: Message) = conversationRows.displayed(message)
     var selected by mutableStateOf<String?>(null)
     private var allScenes by mutableStateOf(app.getSharedPreferences("scenes",0).getBoolean("all.${connection?.endpoint}",false))
     var showAllScenes:Boolean
@@ -44,11 +48,13 @@ class TownModel internal constructor(app: Application, private val client: OkHtt
     private var directory by mutableStateOf(runCatching { JSONObject(scenePrefs.getString("directory","{}")!!) }.getOrDefault(JSONObject()))
     var timeline by mutableStateOf<List<Message>>(emptyList()); private set
     var historyLoading by mutableStateOf(false);private set
+    var historyNotice by mutableStateOf<String?>(null);private set
     private val historyFile=File(app.filesDir,"history-cache.json")
     private var historyCache=runCatching{JSONObject(historyFile.readText())}.getOrDefault(JSONObject())
     val mainID get()=connection?.let { scenePrefs.getString("main.${it.endpoint}",null) }
     private var historyCursor = 0
     private fun restoreTimeline(endpoint: String?) {
+        historyNotice = null
         val saved = historyCache.optJSONArray(endpoint ?: "")
         timeline = saved?.let { a -> (0 until a.length()).map { HistoryRules.decode(a.getJSONObject(it)) } }.orEmpty()
         historyCursor = timeline.maxOfOrNull { it.sequence ?: 0 } ?: 0
@@ -223,7 +229,7 @@ class TownModel internal constructor(app: Application, private val client: OkHtt
         }
     }
     fun history() {
-        if(historyLoading)return;val c=connection ?: return;historyLoading=true
+        if(historyLoading)return;val c=connection ?: return;historyLoading=true;historyNotice=null
         viewModelScope.launch {
             try {
                 var cursor = historyCursor
@@ -245,12 +251,12 @@ class TownModel internal constructor(app: Application, private val client: OkHtt
                         val temp = File(historyFile.parentFile, "history-cache.tmp")
                         temp.writeText(historyCache.toString())
                         check(temp.renameTo(historyFile))
-                    } } catch(e:CancellationException){throw e} catch(_:Exception){notice="历史记录已加载，但缓存保存失败，请检查设备存储空间。"}
+                    } } catch(e:CancellationException){throw e} catch(_:Exception){historyNotice="历史记录已加载，但缓存保存失败，请检查设备存储空间。"}
                     persist()
                     if(initial)break
                 }
                 if(notice=="发送未完成，请查看发送队列。")notice=null
-            }catch(e:CancellationException){throw e}catch(e:Exception){if(connection==c)notice=HistoryRules.failureMessage(e)}finally{historyLoading=false}
+            }catch(e:CancellationException){throw e}catch(e:Exception){if(connection==c)historyNotice=HistoryRules.failureMessage(e)}finally{historyLoading=false}
         }
     }
     fun loadOutbox(){if(outboxFile.exists())runCatching{val a=JSONArray(outboxFile.readText());outbox=(0 until a.length()).map{PendingSend.read(a.getJSONObject(it))}}.onFailure{outboxUnavailable=true;notice="发送队列无法读取，已保留原文件；请先恢复队列文件。"}}
@@ -346,7 +352,15 @@ class TownModel internal constructor(app: Application, private val client: OkHtt
     }
     private fun project(entry:PendingSend, live:Boolean=false){
         if (!live && entry.id == activeSendID) liveProcess = entry.process
-        rooms=rooms.map{room->if(room.id!=entry.sceneID||room.endpoint!=entry.endpoint)room else room.copy(messages=ReplyStream.project(room.messages,entry))}
+        val roomIndex = rooms.indexOfFirst { it.id == entry.sceneID && it.endpoint == entry.endpoint }
+        if (roomIndex >= 0) {
+            val room = rooms[roomIndex]
+            val frame = if (live) entry.copy(process = room.messages.firstOrNull { it.id == entry.userID }?.process.orEmpty()) else entry
+            val projected = ReplyStream.project(room.messages, frame)
+            if (!live || !conversationRows.updateText(roomIndex, projected)) {
+                rooms = rooms.toMutableList().also { it[roomIndex] = room.copy(messages = projected) }
+            }
+        }
         if(busy&&activeSendID==entry.id&&entry.phase in listOf("sending","waiting"))ReplyStream.messages(entry).lastOrNull{it.text.isNotEmpty()}?.let{streamingReplyID=it.id}
     }
     private fun consume(type:String,data:JSONObject,entry:PendingSend){

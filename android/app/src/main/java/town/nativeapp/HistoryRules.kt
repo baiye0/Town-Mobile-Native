@@ -47,10 +47,11 @@ object HistoryRules {
         .copy(id=m.nullString("id") ?: m.nullString("kind")?.takeIf{it.startsWith("local:")} ?: if(m.has("seq")&&!m.isNull("seq"))"server:${m.getInt("seq")}" else java.util.UUID.randomUUID().toString(),
             localBaseline=if(m.has("localBaseline")&&!m.isNull("localBaseline"))m.getInt("localBaseline") else null,replyTo=m.nullString("replyTo"),localAfter=m.nullString("localAfter"),
             streaming=if(m.has("streaming")&&!m.isNull("streaming"))m.getBoolean("streaming") else null,persistedText=m.nullString("persistedText"))
+        .let { if(it.kind=="marker"&&it.text=="已停止")it.copy(text=marker("[breath interrupted]")) else it }
 
     fun role(raw:String)=if(raw=="user")"user" else "being"
     fun text(value:Any?):String=when(value){is String->value;is JSONArray->(0 until value.length()).mapNotNull{val item=value.optJSONObject(it);(item?.opt("text") ?: item?.opt("content")) as? String}.joinToString("\n\n");else->""}
-    fun marker(text:String)=when{ text.startsWith("[breath yielded",true)->"放下手头的事，转向你";text.startsWith("[breath interrupted",true)->"已停止";text.startsWith("[breath superseded",true)->"被新的对话取代";else->text.trim('[',']') }
+    fun marker(text:String)=when{ text.startsWith("[breath yielded",true)->"放下手头的事，转向你";text.startsWith("[breath interrupted",true)->"上一条回复已打断";text.startsWith("[breath superseded",true)->"被新的对话取代";else->text.trim('[',']') }
     fun decode(r:JSONObject):Message {
         val content=text(r.opt("content"));val marker=r.optString("from")=="system"||r.optString("type")=="marker"
         return Message(role(r.optString("role")),if(marker)marker(content) else SceneRules.stripTransition(content),r.optString("scene_id").takeIf{it.isNotEmpty()&&it!="null"},if(r.has("seq"))r.optInt("seq") else null,if(marker)"marker" else null,r.optString("at").takeIf{it.isNotEmpty()},r.optString("scene_label",r.optJSONObject("scene_meta")?.optString("scene_label") ?: "").takeIf{it.isNotEmpty()})
@@ -125,10 +126,30 @@ object HistoryRules {
     fun ordered(messages:List<Message>):List<Message> {
         val parents=messages.associateBy{it.id}
         val repliesByPrompt=messages.filter{it.role=="being"&&it.replyTo!=null}.groupBy{it.replyTo}
+        val successors=messages.filter { child ->
+            val parent=parents[child.localAfter ?: child.replyTo]
+            parent!=null&&parent.sceneID==child.sceneID&&parent.id!=child.id
+        }.groupBy { it.localAfter ?: it.replyTo }
+        val future=mutableMapOf<String,Pair<Int,Int>?>()
+        fun nextConfirmed(message:Message,visiting:Set<String> = emptySet()):Pair<Int,Int>? {
+            if(message.id in visiting)return null
+            if(future.containsKey(message.id))return future[message.id]
+            // A stream can acknowledge a reply before history acknowledges its prompt.
+            // Anchor the unsaved causal chain immediately BEFORE that known sequence,
+            // rather than letting a legacy parent's missing sequence act as infinity.
+            val candidate=successors[message.id].orEmpty().mapNotNull { child ->
+                child.sequence?.let { it to -1 }
+                    ?: nextConfirmed(child,visiting+message.id)?.let { it.first to it.second-1 }
+            }.filter { message.localBaseline==null||it.first>message.localBaseline }
+                .minWithOrNull(compareBy<Pair<Int,Int>>{it.first}.thenBy{it.second})
+            future[message.id]=candidate
+            return candidate
+        }
         val positions=mutableMapOf<String,Pair<Int,Int>>()
         fun position(message:Message,visiting:Set<String> = emptySet()):Pair<Int,Int> {
             positions[message.id]?.let{return it}
             message.sequence?.let{return it to 0}
+            nextConfirmed(message)?.let { return it.also { anchor->positions[message.id]=anchor } }
             val baseline=message.localBaseline ?: Int.MAX_VALUE
             val parent=parents[message.localAfter ?: message.replyTo]
             if(message.id in visiting||parent==null||parent.sceneID!=message.sceneID)return baseline to 1

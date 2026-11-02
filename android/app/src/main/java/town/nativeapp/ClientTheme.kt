@@ -14,10 +14,10 @@ fun clientColors(dark:Boolean):ColorScheme {
     return scheme.copy(primary=accent,onPrimary=button,primaryContainer=surface,onPrimaryContainer=text,secondary=secondary,onSecondary=button,secondaryContainer=surface,onSecondaryContainer=text,tertiary=secondary,onTertiary=button,tertiaryContainer=surface,onTertiaryContainer=text,background=bg,onBackground=text,surface=bg,onSurface=text,surfaceVariant=surface,onSurfaceVariant=secondary,surfaceTint=Color.Transparent,outline=Color(if(dark)0xff858585 else 0xff8b8b89),outlineVariant=Color(if(dark)0xff333333 else 0xffe9e9e7),surfaceContainerLowest=bg,surfaceContainerLow=surface,surfaceContainer=surface,surfaceContainerHigh=surface,surfaceContainerHighest=surface,inverseSurface=text,inverseOnSurface=bg,inversePrimary=bg)
 }
 
-// Muse screenshot: blue sent bubble and neutral received bubble.
+// Quiet, distinct bubbles with readable text in both appearances.
 fun ColorScheme.chatBubble(user:Boolean):Color {
     val dark=background.luminance()<0.5f
-    return Color(if(user){if(dark)0xff005fcc else 0xff005fcc}else{if(dark)0xff383838 else 0xffebebed})
+    return Color(if(user){if(dark)0xff293d50 else 0xffe8f0f8}else{if(dark)0xff2c2c2e else 0xfff3f3f2})
 }
 
 fun ColorScheme.feedAction()=Color(if(background.luminance()<0.5f)0xff8abbff else 0xff1767c4)

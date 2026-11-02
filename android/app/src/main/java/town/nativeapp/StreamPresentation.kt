@@ -15,7 +15,9 @@ class StreamPresentation(private val scope:CoroutineScope,private val publish:(P
             publish(snapshot)
             task=scope.launch {
                 while(true) {
-                    delay(16)
+                    // Coalesce network token bursts; parsing/layout need not run at token rate.
+                    val length=(pending ?: snapshot).reply.length
+                    delay(when { length<2_000->50L;length<12_000->80L;else->120L })
                     val next=pending ?: break
                     pending=null;publish(next)
                 }
