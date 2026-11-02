@@ -86,10 +86,28 @@ extension Store {
                     for (name, value) in headers { if let value = value as? String { put.setValue(value, forHTTPHeaderField: name) } }
                 }
                 stage = "上传附件文件"
-                let (_, response) = try await session.upload(for: put, fromFile: localURL)
-                guard let http = response as? HTTPURLResponse else { throw PortalError.invalidResponse }
-                guard (200..<300).contains(http.statusCode) || [409, 412].contains(http.statusCode) else { throw AttachmentHTTPError(status: http.statusCode) }
+                let uploadRequest = put
+                let resourceTimeout = session.configuration.timeoutIntervalForResource
+                try await AttachmentUploadRetry.run(operation: {
+                    // A fresh credential-free session avoids reusing the failed
+                    // connection and keeps the signed grant isolated from chat.
+                    let configuration = URLSessionConfiguration.ephemeral
+                    configuration.httpCookieStorage = nil
+                    configuration.urlCredentialStorage = nil
+                    configuration.waitsForConnectivity = true
+                    configuration.timeoutIntervalForResource = resourceTimeout
+                    let uploadSession = URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
+                    defer { uploadSession.invalidateAndCancel() }
+                    let (_, response) = try await uploadSession.upload(for: uploadRequest, fromFile: localURL)
+                    guard let http = response as? HTTPURLResponse else { throw PortalError.invalidResponse }
+                    guard (200..<300).contains(http.statusCode) || [409, 412].contains(http.statusCode) else { throw AttachmentHTTPError(status: http.statusCode) }
+                    // complete below still verifies readiness after a conflict
+                    // (e.g. the first PUT succeeded but its response was lost).
+                }, onRetry: { retry in
+                    await MainActor.run { self.activity = "上传暂时中断，正在重试（\(retry)/2）" }
+                })
             }
+            try Task.checkCancellation()
             stage = "确认附件上传"
             let completed = try await attachmentJSON(c, "/api/attachments/\(id)/complete", body: [:])
             guard completed["attachment_id"] as? String == id, completed["status"] as? String == "ready" else { throw PortalError.server("附件上传未确认，请稍后重试。") }

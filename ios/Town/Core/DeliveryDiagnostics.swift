@@ -39,7 +39,7 @@ enum DeliveryDiagnostics {
             switch ns.code {
             case NSURLErrorNotConnectedToInternet: hint = "网络未连接，请检查 Wi-Fi 或蜂窝网络后重试。"
             case NSURLErrorTimedOut: hint = "请求超时，请切换网络或稍后重试。"
-            case NSURLErrorNetworkConnectionLost: hint = "网络连接中断，请恢复网络后重试。"
+            case NSURLErrorNetworkConnectionLost: hint = "请求连接中断，可能是网络波动或服务端断开，请稍后重试；若反复出现，请切换网络并反馈错误信息。"
             case NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed: hint = "无法连接服务，请检查网络或稍后重试。"
             case NSURLErrorSecureConnectionFailed, NSURLErrorServerCertificateUntrusted: hint = "无法建立安全连接，请检查设备时间或联系服务维护者。"
             default: hint = "网络请求未完成，请稍后重试。"
