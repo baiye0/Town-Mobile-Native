@@ -110,3 +110,12 @@ import Testing
     #expect(TownContracts.authorKey("t_123") == "author")
     #expect(TownContracts.authorKey("legacy_being") == "being_id")
 }
+
+@Test func indexedReplyContextKeepsFirstParentAndPrefersServerPreview() {
+    let parents = ReplyRules.parentIndex([["seq":7, "message":"first"], ["id":"7", "message":"duplicate"]])
+    #expect(ReplyRules.context(["reply_to":7]) { parents[$0] } == "原消息：first")
+    #expect(ReplyRules.context(["reply_to":7, "reply_to_preview":"server"]) { _ in
+        Issue.record("A supplied preview should not look up its parent")
+        return nil
+    } == "原消息：server")
+}

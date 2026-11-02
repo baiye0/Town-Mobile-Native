@@ -101,6 +101,12 @@ extension Store {
                 var accepted = false
                 let completed = try await reconcile(&entry, connection: c) { accepted = $0 }
                 try Task.checkCancellation()
+                guard connection == c else { return }
+                // Await the durable save before taking any queue index or rollback snapshot.
+                if !DeliveryRules.shouldRecoverConfirmedSend(active: active, accepted: accepted, hasReply: !entry.reply.isEmpty), completed || accepted {
+                    guard await persistConfirmed() else { throw PortalError.server("无法保存已确认的消息") }
+                }
+                try Task.checkCancellation()
                 guard connection == c, let index = outbox.firstIndex(where: { $0.id == id && $0.phase == "unknown" }) else { return }
                 let previous = outbox
                 if DeliveryRules.shouldRecoverConfirmedSend(active: active, accepted: accepted, hasReply: !entry.reply.isEmpty) {
@@ -110,7 +116,6 @@ extension Store {
                     outbox[index] = entry
                     resumeConfirmed = true
                 } else if completed || accepted {
-                    guard persist() else { throw PortalError.server("无法保存已确认的消息") }
                     outbox.remove(at: index)
                 } else if !active && entry.reply.isEmpty {
                     entry.phase = "queued"; entry.error = nil; entry.streamID = nil; entry.cursor = 0
@@ -135,14 +140,10 @@ extension Store {
         guard !conversationStorageUnavailable, !outboxUnavailable, !messageDeletionsUnavailable, worker == nil, !busy, let c = connection else { return }
         // Failed, stopped and unresolved sends are not automatic retry candidates.
         // Leave them actionable on their own bubbles without blocking newer messages.
-        let endpointItems = outbox.enumerated().filter { $0.element.endpoint == c.endpoint }
-        let recoverUnknown = recover && !endpointItems.contains { ["queued", "preparing"].contains($0.element.phase) }
-        var head = 0
-        while head < endpointItems.count && DeliveryRules.skipsQueueHead(endpointItems[head].element.phase, recovering: recoverUnknown) { head += 1 }
-        guard head < endpointItems.count else { return }
-        let first = endpointItems[head].element
-        guard !isMessageDeleted(Message(id: first.userID, role: "user", text: first.preparedText ?? first.text, sceneID: first.sceneID), endpoint: c.endpoint) else { return }
-        guard ["queued", "preparing"].contains(first.phase) || recover && ["sending", "waiting", "unknown"].contains(first.phase) else { return }
+        let candidates = outbox.filter { entry in
+            entry.endpoint == c.endpoint && !isMessageDeleted(Message(id: entry.userID, role: "user", text: entry.preparedText ?? entry.text, sceneID: entry.sceneID), endpoint: c.endpoint)
+        }
+        guard let first = DeliveryRules.nextDelivery(candidates, recoverUnknown: recover) else { return }
         runProgress.process = first.process
         busy = true; activeScene = first.sceneID; activeSendID = first.id
         #if DEBUG
@@ -239,7 +240,8 @@ extension Store {
                 if safeToContinue {
                     _ = try? await reconcile(&entry, connection: c)
                     failureStage = "保存消息"
-                    guard persist() else { throw PortalError.server("无法保存已完成的回复") }
+                    guard await persistConfirmed() else { throw PortalError.server("无法保存已完成的回复") }
+                    try Task.checkCancellation()
                     let previous = outbox
                     outbox.removeAll { $0.id == entry.id }; do { try saveOutbox() } catch { outbox = previous; throw error }
                     if notice == "发送未完成，请查看发送队列。" { notice = nil }
@@ -274,14 +276,20 @@ extension Store {
         // Live reasoning belongs to its own observed view, not the entire
         // conversation list. Commit it to the message at transport boundaries.
         if live || activeSendID == entry.id, runProgress.process != entry.process { runProgress.process = entry.process }
-        var room = conversations[i]
-        let process = live ? room.messages.first(where: { $0.id == entry.userID })?.process ?? "" : entry.process
-        var changed = false
+        let process = live ? storedRow(entry.userID, in: i)?.process ?? "" : entry.process
         let rows = [
             Message(id: entry.userID, role: "user", text: entry.preparedText ?? entry.text,
                     sceneID: entry.sceneID, timestamp: entry.createdAt, files: entry.files, process: process,
                     localBaseline: entry.baseline, localAfter: entry.afterID)
         ] + ReplyStream.messages(entry)
+        if !projectTextFrame(rows, in: i) { reconcileRows(rows, in: i) }
+        if busy, activeScene == entry.sceneID, ["sending", "waiting"].contains(entry.phase),
+           let latest = rows.last, latest.role == "being", !latest.text.isEmpty,
+           streamingReplyID != latest.id { streamingReplyID = latest.id }
+    }
+    private func reconcileRows(_ rows: [Message], in i: Int) {
+        var changed = false
+        var room = conversations[i]
         for message in rows {
             if let j = room.messages.firstIndex(where: { $0.id == message.id }) {
                 // Preserve server-confirmed rows and publish only changed content.
@@ -332,10 +340,7 @@ extension Store {
                 changed = true
             }
         }
-        if changed { room.updated = Date(); projectConversation(room, at: i) }
-        if busy, activeScene == entry.sceneID, ["sending", "waiting"].contains(entry.phase),
-           let latest = rows.last, latest.role == "being", !latest.text.isEmpty,
-           streamingReplyID != latest.id { streamingReplyID = latest.id }
+        if changed { room.updated = Date(); conversations[i] = room }
     }
     private func updateActivity(_ value: String) {
         if activity != value { activity = value }
@@ -391,7 +396,11 @@ extension Store {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if code == 204 { return try await reconcile(&entry, connection: c) }
                 guard code == 200, let data = try JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { throw PortalError.http(code) }
-                let id = data["stream_id"] as? String
+                guard let id = data["stream_id"] as? String, !id.isEmpty, let finished = data["finished"] as? Bool else {
+                    return try await reconcile(&entry, connection: c)
+                }
+                // A retained snapshot might be the previous turn in this same scene.
+                if entry.streamID == nil, finished { return try await reconcile(&entry, connection: c) }
                 if let expected = entry.streamID, id != expected { return try await reconcile(&entry, connection: c) }
                 // A 202 may be queued behind an unrelated scene; never consume that scene's stream.
                 if entry.streamID == nil, data["scene_id"] as? String != entry.sceneID { if try await reconcile(&entry, connection: c) { return true } }
@@ -412,7 +421,7 @@ extension Store {
                     OutboxCheckpoint.schedule(outbox, to: outboxFile) { [weak self] in
                         Task { @MainActor in self?.notice = "回复恢复状态未能保存，请检查设备存储空间。" }
                     }
-                    if data["finished"] as? Bool == true { return try await reconcile(&entry, connection: c) }
+                    if finished { return try await reconcile(&entry, connection: c) }
                 }
                 failures = 0
             } catch is CancellationError { throw CancellationError() }

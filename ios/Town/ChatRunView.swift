@@ -7,8 +7,33 @@ import SwiftUI
 
 struct ActiveChatRunView: View {
     @ObservedObject var progress: RunProgress
+    let hasReply: Bool
     var body: some View {
-        ChatRunView(process: progress.process, activity: progress.activity, isActive: true)
+        if !hasReply || !progress.process.isEmpty {
+            ChatRunView(process: progress.process, activity: progress.activity, isActive: !hasReply)
+        }
+    }
+}
+
+/// Only opacity changes; waiting never changes row geometry or scroll position.
+struct WaitingReplyBubble: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3) { index in
+                Circle().fill(ClientTheme.secondary).frame(width: 5, height: 5)
+                    .opacity(pulsing && !reduceMotion ? 0.45 : 1)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.65)
+                        .repeatForever(autoreverses: true).delay(Double(index) * 0.14), value: pulsing)
+            }
+        }.frame(height: 20).padding(.horizontal, 16).padding(.vertical, 12)
+            .background(ClientTheme.chatReply, in: RoundedRectangle(cornerRadius: 22))
+            .accessibilityElement(children: .ignore).accessibilityLabel("正在等待回复")
+            .accessibilityIdentifier("waitingReplyBubble")
+            .onAppear { pulsing = !reduceMotion }
+            .onChange(of: reduceMotion) { pulsing = !$0 }
     }
 }
 

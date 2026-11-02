@@ -1,10 +1,16 @@
 import SwiftUI
 
+struct PageRoute: Hashable {
+    let id: UUID
+    let destination: () -> AnyView
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
 @MainActor final class PageHistory: ObservableObject {
-    @Published var path: [UUID] = []
-    @Published var forward: [UUID] = []
-    @Published var pages: [UUID: AnyView] = [:]
-    func navigate(_ next: [UUID]) {
+    @Published var path: [PageRoute] = []
+    @Published var forward: [PageRoute] = []
+    func navigate(_ next: [PageRoute]) {
         if next.count < path.count && Array(path.prefix(next.count)) == next {
             forward.insert(contentsOf: path.dropFirst(next.count), at: 0)
         } else if next != path { forward.removeAll() }
@@ -32,8 +38,8 @@ struct HistoryStack<Content: View>: View {
         if inherited != nil { content() }
         else {
             NavigationStack(path: Binding(get: { history.path }, set: { history.navigate($0) })) {
-                content().navigationDestination(for: UUID.self) { id in
-                    history.pages[id]
+                content().navigationDestination(for: PageRoute.self) { route in
+                    route.destination()
                         .navigationBarBackButtonHidden(!glass)
                         .toolbar {
                             if !glass {
@@ -83,9 +89,8 @@ struct HistoryLink<Content: View, LabelView: View>: View {
         self.destination = destination; self.label = { Text(title) }
     }
     var body: some View {
-        if let history {
-            NavigationLink(value: id, label: label)
-                .onAppear { history.pages[id] = AnyView(destination()) }
+        if history != nil {
+            NavigationLink(value: PageRoute(id: id) { [destination] in AnyView(destination()) }, label: label)
         } else { NavigationLink(destination: destination, label: label) }
     }
 }

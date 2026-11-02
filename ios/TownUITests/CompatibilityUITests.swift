@@ -539,7 +539,7 @@ final class CompatibilityUITests: XCTestCase {
     }
 
     func testScrollingLongHistoryWhileThinkingContinuously() throws {
-        app.launchArguments += ["--chat-performance-probe"]
+        app.launchArguments += ["--chat-performance-probe", "-chat.showThinking", "YES"]
         let server = try connectToFixture(historyCount: 1000)
         server.enableChat(staged: true)
         XCTAssertTrue(app.staticTexts["Compatibility message 1000"].waitForExistence(timeout: 10))
@@ -566,7 +566,48 @@ final class CompatibilityUITests: XCTestCase {
         wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["停止生成"])], timeout: 10)
     }
 
+    func testQuietReplyBubbleGivesWayToFirstVisibleText() throws {
+        let server = try connectToFixture()
+        server.enableChat(staged: true)
+        XCTAssertTrue(app.staticTexts["Compatibility message 060"].waitForExistence(timeout: 10))
+        let input = app.descendants(matching: .any).matching(identifier: "消息").firstMatch
+        input.tap(); input.typeText("Quiet reply"); app.buttons["发送"].tap()
+        let dots = app.descendants(matching: .any).matching(identifier: "waitingReplyBubble").firstMatch
+        XCTAssertTrue(dots.waitForExistence(timeout: 10))
+        server.emitProgress("tool_use", ["name": "search"])
+        XCTAssertFalse(app.buttons["activeRunDetails"].exists)
+        capture("quiet-waiting-bubble")
+        server.appendReply(" ")
+        XCTAssertTrue(dots.exists)
+        server.appendReply("Quiet final reply.")
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Quiet final reply.")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertFalse(dots.exists)
+        server.finishReply()
+        wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.buttons["停止生成"])], timeout: 10)
+        XCTAssertFalse(app.buttons["completedRunDetails"].exists)
+        if app.keyboards.firstMatch.exists {
+            app.buttons["对话记录"].tap()
+            app.buttons["收起侧栏"].tap()
+            wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)], timeout: 5)
+        }
+
+        app.tabBars.buttons["更多"].tap()
+        app.staticTexts["对话设置"].tap()
+        let toggle = app.switches["显示思考过程"]
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        app.tabBars.buttons["对话"].tap()
+        XCTAssertTrue(app.buttons["completedRunDetails"].waitForExistence(timeout: 5))
+        app.terminate(); app.launch()
+        app.tabBars.buttons["更多"].tap()
+        if !toggle.exists { app.staticTexts["对话设置"].tap() }
+        XCTAssertEqual(toggle.value as? String, "1")
+        toggle.tap()
+        app.navigationBars.buttons.firstMatch.tap()
+    }
+
     func testLiveProcessAndIncrementalReplyBeforeStreamCompletes() throws {
+        app.launchArguments += ["-chat.showThinking", "YES"]
         let server = try connectToFixture()
         server.enableChat(staged: true)
         XCTAssertTrue(app.staticTexts["Compatibility message 060"].waitForExistence(timeout: 10))
@@ -594,9 +635,11 @@ final class CompatibilityUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["runProcessDetails"].exists)
         XCTAssertFalse(app.staticTexts["liveProcessPreview"].exists)
         server.emitProgress("tool_result", ["content": "已找到结果"])
+        activeDetails.tap()
         server.appendReply("第一段")
         let first = app.staticTexts["第一段"]
         XCTAssertTrue(first.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.scrollViews["runProcessScroll"].exists)
         XCTAssertTrue(app.buttons["停止生成"].exists)
         capture("incremental-first-fragment")
         // Release each chunk only AFTER observing the previous chunk in the UI.

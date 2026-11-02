@@ -8,6 +8,19 @@ class ReplyStreamTest {
     private fun pending()=PendingSend(endpoint="https://example.invalid",sceneID="s",title="s",text="你好",baseline=10)
     private fun consume(entry:PendingSend,type:String,json:String="{}")=ReplyStream.consume(type,JSONObject(json),entry)
 
+    @Test fun repeatedFramesPreserveIdentityAndNewMetadataStillMergesHistoryEcho() {
+        val entry = pending()
+        consume(entry, "text", """{"text":"open"}""")
+        val initial = ReplyStream.project(emptyList(), entry)
+        assertSame(initial, ReplyStream.project(initial, entry))
+        val echo = Message("being", "open", "s", sequence = 14)
+        val duplicates = initial + echo
+        entry.bubbles = entry.bubbles!!.map { it.copy(sequence = 14) }
+        val merged = ReplyStream.project(duplicates, entry)
+        assertEquals(1, merged.count { it.sequence == 14 })
+        assertEquals(entry.replyID, merged.single { it.sequence == 14 }.id)
+    }
+
     @Test fun keepaliveAndProviderSpecificDeltaDoNotDropText() {
         val parser=SSEParser();val entry=pending();val snapshots=mutableListOf<String>()
         val wire=": heartbeat\n\nevent: ping\ndata: keepalive\n\nevent: content_block_delta\ndata: {\"delta\":{\"type\":\"provider_text\",\"text\":\"第一段\"}}\n\nevent: content_block_delta\ndata: {\"delta\":{\"text\":\"第二段\"}}\n\n"
@@ -145,13 +158,18 @@ class ReplyStreamTest {
     }
 
     @Test fun indicatorsAndQueueSelectionKeepUnconfirmedSendsIndependent() {
-        for(phase in listOf("queued","preparing","sending","waiting")) {
-            assertFalse(DeliveryRules.showsRetry(phase));assertFalse(DeliveryRules.skipsQueueHead(phase,false))
-        }
-        for(phase in listOf("failed","unknown")) {
-            assertTrue(DeliveryRules.showsRetry(phase));assertTrue(DeliveryRules.skipsQueueHead(phase,false))
-        }
-        assertFalse(DeliveryRules.skipsQueueHead("unknown",true));assertTrue(DeliveryRules.skipsQueueHead("stopped",true));assertFalse(DeliveryRules.showsRetry("stopped"))
+        fun entry(phase:String)=PendingSend(endpoint="A",sceneID="scene",title="scene",text=phase,phase=phase)
+        val waiting=entry("waiting");val sending=entry("sending");val queued=entry("queued")
+        val unresolved=entry("unknown");val second=entry("unknown")
+        val queue=listOf(entry("failed"),entry("stopped"),unresolved,queued,waiting,sending,second)
+        assertSame(waiting,DeliveryRules.nextDelivery(queue,"A",false))
+        assertSame(sending,DeliveryRules.nextDelivery(queue-waiting,"A",false))
+        assertSame(queued,DeliveryRules.nextDelivery(queue-waiting-sending,"A",true))
+        assertSame(second,DeliveryRules.nextDelivery(queue,"A",false,second.id))
+        assertNull(DeliveryRules.nextDelivery(queue,"B",true,second.id))
+        assertNull(DeliveryRules.nextDelivery(listOf(unresolved),"A",false))
+        assertTrue(DeliveryRules.showsRetry("failed"));assertTrue(DeliveryRules.showsRetry("unknown"))
+        assertFalse(DeliveryRules.showsRetry("stopped"))
     }
 
     @Test fun progressIsScopedAndMetadataDoesNotExtendRecoveryForever() {

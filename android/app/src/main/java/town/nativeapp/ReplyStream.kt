@@ -77,31 +77,49 @@ object ReplyStream {
     }
 
     fun project(existing:List<Message>,entry:PendingSend):List<Message> {
-        val result=existing.toMutableList()
         val rows=listOf(Message("user",entry.preparedText ?: entry.text,entry.sceneID,kind=entry.userID,timestamp=entry.createdAt,
-            files=entry.files.toList(),process=entry.process,id=entry.userID,localBaseline=entry.baseline,localAfter=entry.afterID))+messages(entry)
-        for(row in rows) {
-            val i=result.indexOfFirst{it.id==row.id || it.kind==row.id}
-            if(i<0)result.add(row) else {
-                val old=result[i]
-                if(old.sequence==null||old.sequence==row.sequence||old.streaming==true) {
-                    val authoritative=old.persistedText.takeUnless{row.sequence==null&&row.text!=old.text}
-                    result[i]=row.copy(sequence=row.sequence ?: old.sequence,persistedText=authoritative,
-                        text=if(row.streaming==false)authoritative ?: row.text else row.text)
-                } else if(row.role=="user")result[i]=old.copy(process=row.process)
+            files=entry.files.map { it.copy() },process=entry.process,id=entry.userID,localBaseline=entry.baseline,localAfter=entry.afterID))+messages(entry)
+        // The stored list is already in canonical order. Preserve it for text,
+        // process and delivery updates; only topology/order changes need a sort.
+        var changed: MutableList<Message>? = null
+        var reorder = false
+        fun edit(): MutableList<Message> = changed ?: existing.toMutableList().also { changed = it }
+        for (row in rows) {
+            val current = changed ?: existing
+            val i = current.indexOfLast { it.id == row.id || it.kind == row.id }
+            if (i < 0) {
+                edit().add(row); reorder = true
+            } else {
+                val old = current[i]
+                val updated = if (old.sequence == null || old.sequence == row.sequence || old.streaming == true) {
+                    val authoritative = old.persistedText.takeUnless { row.sequence == null && row.text != old.text }
+                    row.copy(sequence = row.sequence ?: old.sequence, persistedText = authoritative,
+                        text = if (row.streaming == false) authoritative ?: row.text else row.text)
+                } else if (row.role == "user") old.copy(process = row.process) else old
+                if (updated != old) {
+                    edit()[i] = updated
+                    reorder = reorder || old.id != updated.id || old.sequence != updated.sequence ||
+                        old.localBaseline != updated.localBaseline || old.localAfter != updated.localAfter ||
+                        old.replyTo != updated.replyTo || old.timestamp != updated.timestamp ||
+                        old.sceneID != updated.sceneID || old.role != updated.role
+                }
             }
-            if(row.sequence!=null) {
-                val duplicate=result.indexOfFirst{it.sequence==row.sequence&&it.id!=row.id}
-                val live=result.indexOfFirst{it.id==row.id}
-                if(duplicate>=0&&live>=0) {
-                    val confirmed=result[duplicate]
-                    result[live]=row.copy(text=if(row.streaming==true)row.text else confirmed.text,
-                        persistedText=if(row.streaming==true)confirmed.text else null)
-                    result.removeAt(duplicate)
+            if (row.sequence != null) {
+                val list = changed ?: existing
+                val duplicate = list.indexOfFirst { it.sequence == row.sequence && it.id != row.id }
+                if (duplicate >= 0) {
+                    val confirmed = list[duplicate]
+                    val live = list.indexOfLast { it.id == row.id }
+                    if (live >= 0) {
+                        edit()[live] = row.copy(text = if (row.streaming == true) row.text else confirmed.text,
+                            persistedText = if (row.streaming == true) confirmed.text else null)
+                        edit().removeAt(duplicate); reorder = true
+                    }
                 }
             }
         }
-        return HistoryRules.ordered(result)
+        val result = changed ?: return existing
+        return if (reorder) HistoryRules.ordered(result) else result
     }
 
     fun bindHistory(confirmed:List<Message>,entry:PendingSend):List<Message> {

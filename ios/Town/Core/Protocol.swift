@@ -66,8 +66,8 @@ public struct SSEParser {
         return nil
     }
 }
-struct Message: Codable, Identifiable, Equatable { var id = UUID(); var role: String; var text: String; var sceneID: String? = nil; var sequence: Int? = nil; var kind: String? = nil; var timestamp: String? = nil; var sceneLabel: String? = nil; var files: [PendingAttachment]? = nil; var process: String? = nil; var localBaseline: Int? = nil; var replyTo: UUID? = nil; var localAfter: UUID? = nil; var streaming: Bool? = nil; var persistedText: String? = nil }
-struct Conversation: Codable, Identifiable {
+struct Message: Codable, Identifiable, Equatable, Sendable { var id = UUID(); var role: String; var text: String; var sceneID: String? = nil; var sequence: Int? = nil; var kind: String? = nil; var timestamp: String? = nil; var sceneLabel: String? = nil; var files: [PendingAttachment]? = nil; var process: String? = nil; var localBaseline: Int? = nil; var replyTo: UUID? = nil; var localAfter: UUID? = nil; var streaming: Bool? = nil; var persistedText: String? = nil }
+struct Conversation: Codable, Identifiable, Sendable {
     var id: String = "mobile-" + UUID().uuidString
     var endpoint: String; var title = "新对话"; var messages: [Message] = []; var updated = Date()
 }

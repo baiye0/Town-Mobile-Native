@@ -2,7 +2,16 @@ package town.nativeapp
 import org.junit.Test
 import org.junit.Assert.*
 import org.json.JSONObject
+import org.json.JSONArray
 class HistoryPresentationTest {
+    @Test fun replayedHistoryPageProducesNoDeltaAndMixedPagesAdvanceInOrder() {
+        val page = JSONArray("""[{"seq":8},{"seq":7},{"seq":10,"content":"old"},{"seq":9},{"seq":10,"content":"new"}]""")
+        val fresh = HistoryRules.freshRows(page, after = 8)
+        assertEquals(listOf(9, 10), fresh.keys.toList())
+        assertEquals("new", fresh.getValue(10).getString("content"))
+        assertTrue(HistoryRules.freshRows(page, after = fresh.lastKey()).isEmpty())
+        assertTrue(HistoryRules.freshRows(JSONArray(), after = 10).isEmpty())
+    }
     @Test fun sbsStatusSeparatesHumanAndFinishedStreams() {
         assertNull(HistoryRules.sbsStatus(JSONObject()))
         assertEquals("",HistoryRules.sbsStatus(JSONObject("""{"stream_id":"a","finished":false,"origin":"human"}""")))

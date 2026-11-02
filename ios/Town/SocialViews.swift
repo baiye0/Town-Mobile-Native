@@ -46,8 +46,8 @@ struct PairingView: View {
 struct SocialRow: Identifiable {
     var context: String?
     var id: String; var author: String; var recipient: String; var content: String; var date: String; var raw: [String: Any]
-    init(_ data: [String: Any], index: Int, peers: [[String:Any]] = []) {
-        context = ReplyRules.context(data,rows:peers)
+    init(_ data: [String: Any], index: Int, parents: [String:String]) {
+        context = ReplyRules.context(data) { parents[$0] }
         raw = data; id = field(data, "id", "seq", "message_id"); if id.isEmpty { id = "row-\(index)" }
         author = field(data, "sender_display", "sender_display_name", "speaker_name", "display_name", "sender_name", "sender", "town_id")
         recipient = field(data, "sender_town_id", "town_id", "sender_display", "sender_display_name")
@@ -231,7 +231,11 @@ struct SocialView: View {
             } else { data = try await social.request(path) }
             try Task.checkCancellation(); guard loadID == requestID else { return }
             if kind == .firesides && roomID.isEmpty { var ids: Set<String> = []; rooms = ((data["owned"] as? [[String: Any]] ?? []) + (data["joined"] as? [[String: Any]] ?? [])).filter { ids.insert(field($0, "id", "fireside_id")).inserted } }
-            else { rows = FeedRules.newestFirst(data["messages"] as? [[String: Any]] ?? []).enumerated().map { SocialRow($0.element, index: $0.offset, peers:data["messages"] as? [[String:Any]] ?? []) } }
+            else {
+                let messages = data["messages"] as? [[String: Any]] ?? []
+                let parents = ReplyRules.parentIndex(messages)
+                rows = FeedRules.newestFirst(messages).enumerated().map { SocialRow($0.element, index: $0.offset, parents: parents) }
+            }
             if kind == .firesides {
                 social.acknowledge(firesideID: roomID, messages: data["messages"] as? [[String: Any]] ?? [])
             } else { social.acknowledge(kind) }

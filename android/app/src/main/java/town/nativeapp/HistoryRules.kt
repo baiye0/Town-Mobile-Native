@@ -21,6 +21,15 @@ object HistoryRules {
     }
 
     fun requestPath(cursor:Int)=if(cursor>0) "/api/history?limit=500&after=$cursor" else "/api/history?limit=500"
+    fun freshRows(page: JSONArray, after: Int): java.util.SortedMap<Int, JSONObject> {
+        val fresh = sortedMapOf<Int, JSONObject>()
+        for (i in 0 until page.length()) {
+            val row = page.getJSONObject(i)
+            val seq = row.optInt("seq")
+            if (seq > after) fresh[seq] = row
+        }
+        return fresh
+    }
     fun failureMessage(error:Exception):String {
         val detail=when {
             error is java.net.SocketTimeoutException -> "请求超时，请重试。"

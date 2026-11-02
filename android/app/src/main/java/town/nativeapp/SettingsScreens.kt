@@ -27,7 +27,7 @@ import androidx.compose.ui.Alignment
             if(m.connection == null) "尚未连接" else "已连接 · ${android.net.Uri.parse(m.connection!!.endpoint).host}") { nav.screen="connection" } } }
         item { SettingsSectionLabel("设置") }
         item { SettingsCard {
-            SettingsRow("对话设置", destinationIcon("chat"), "SBS · 阅读字号") { nav.screen="conversation-settings" }
+            SettingsRow("对话设置", destinationIcon("chat"), "SBS · 思考过程 · 阅读字号") { nav.screen="conversation-settings" }
             SettingsDivider()
             SettingsRow("模型设置", AppIcons.Model, "线路、模型与思考深度") { nav.screen="models" }
             SettingsDivider()
@@ -84,6 +84,10 @@ private fun appearanceTitle(value:String)=when(value){"light"->"浅色";"dark"->
         item { SettingsCard { Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             SettingsHeading("SBS",Icons.Outlined.AutoAwesome)
             if(m.connection!=null) SBSControl(m) else Text("连接 Being 后可配置 SBS",color=MaterialTheme.colorScheme.onSurfaceVariant)
+        } } }
+        item { SettingsCard { Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+            SettingsHeading("回复显示",destinationIcon("chat"))
+            SettingsToggle("显示思考过程", m.showThinking, subtitle = "开启后，可在对话中展开思考和工具记录。", onChange = m::changeThinkingVisibility)
         } } }
         item { SettingsCard { Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             SettingsHeading("阅读",AppIcons.Type); ReadingSizeSetting()

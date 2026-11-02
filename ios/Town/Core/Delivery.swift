@@ -40,8 +40,10 @@ public enum DeliveryRules {
     static func shouldRecoverConfirmedSend(active: Bool, accepted: Bool, hasReply: Bool) -> Bool {
         active && (accepted || hasReply)
     }
-    static func skipsQueueHead(_ phase: String, recovering: Bool) -> Bool {
-        ["failed", "stopped"].contains(phase) || phase == "unknown" && !recovering
+    static func nextDelivery(_ items: [PendingSend], recoverUnknown: Bool) -> PendingSend? {
+        items.first { $0.phase == "sending" || $0.phase == "waiting" }
+            ?? items.first { $0.phase == "queued" || $0.phase == "preparing" }
+            ?? (recoverUnknown ? items.first { $0.phase == "unknown" } : nil)
     }
     static func matchesSubmittedText(_ history: String, _ submitted: String) -> Bool {
         if history == submitted { return true }

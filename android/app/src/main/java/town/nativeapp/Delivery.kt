@@ -21,7 +21,13 @@ fun JSONObject.nullString(key:String):String?=if(has(key)&&!isNull(key))getStrin
 object DeliveryRules {
     fun showsRetry(phase:String)=phase in listOf("failed","unknown")
     fun shouldRecoverConfirmedSend(active:Boolean,accepted:Boolean,hasReply:Boolean)=active&&(accepted||hasReply)
-    fun skipsQueueHead(phase:String,recovering:Boolean)=phase in listOf("failed","stopped") || phase=="unknown"&&!recovering
+    fun nextDelivery(queue: List<PendingSend>, endpoint: String, recoverUnknown: Boolean, checkID: String? = null): PendingSend? {
+        val items = queue.filter { it.endpoint == endpoint }
+        if (checkID != null) return items.find { it.id == checkID && it.phase == "unknown" }
+        return items.find { it.phase == "sending" || it.phase == "waiting" }
+            ?: items.find { it.phase == "queued" || it.phase == "preparing" }
+            ?: if (recoverUnknown) items.find { it.phase == "unknown" } else null
+    }
     fun matchesSubmittedText(history:String,submitted:String):Boolean {
         val marker=Regex("(?m)^\\[attachment-message:v1:(msg_[a-f0-9]{64}(?:,msg_[a-f0-9]{64})*)\\]\\r?$")
         marker.findAll(submitted).lastOrNull()?.groupValues?.get(1)?.let { return it==marker.findAll(history).lastOrNull()?.groupValues?.get(1) }

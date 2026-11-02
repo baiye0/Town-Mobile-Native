@@ -1,12 +1,24 @@
 import Foundation
 public enum ReplyRules {
     private static func value(_ row:[String:Any],_ keys:[String])->String { for key in keys { if let s=row[key] as? String,!s.isEmpty{return s};if let n=row[key] as? NSNumber{return n.stringValue} };return "" }
-    public static func context(_ row:[String:Any],rows:[[String:Any]] = [])->String? {
-        let id=value(row,["reply_to"]);guard !id.isEmpty else{return nil}
-        let author=value(row,["reply_to_display","reply_to_sender_display","reply_to_being","reply_to_sender"])
-        let parent=rows.first{value($0,["seq","id","message_id"]) == id}
-        let preview=value(row,["reply_to_preview"])
-        let body=preview.isEmpty ? parent.map{value($0,["content","message"])} ?? "" : preview
+    /// Preserve the first matching parent, including when the server repeats an ID.
+    public static func parentIndex(_ rows: [[String: Any]]) -> [String: String] {
+        var parents: [String: String] = [:]
+        for row in rows {
+            let id = value(row, ["seq", "id", "message_id"])
+            if !id.isEmpty, parents[id] == nil { parents[id] = value(row, ["content", "message"]) }
+        }
+        return parents
+    }
+    public static func context(_ row: [String: Any], rows: [[String: Any]] = []) -> String? {
+        context(row) { id in rows.first { value($0, ["seq","id","message_id"]) == id }.map { value($0, ["content","message"]) } }
+    }
+    static func context(_ row: [String: Any], lookup: (String) -> String?) -> String? {
+        let id = value(row, ["reply_to"])
+        guard !id.isEmpty else { return nil }
+        let author = value(row, ["reply_to_display","reply_to_sender_display","reply_to_being","reply_to_sender"])
+        let preview = value(row, ["reply_to_preview"])
+        let body = preview.isEmpty ? lookup(id) ?? "" : preview
         return "\(author.isEmpty || author.hasPrefix("t_") ? "原消息" : author)：\(body.isEmpty ? "原消息预览不可用" : String(body.prefix(500)))"
     }
     public static func prompt(place:String,author:String?,content:String,context:String?,description:String)->String {

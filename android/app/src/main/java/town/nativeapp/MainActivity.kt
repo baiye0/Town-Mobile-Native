@@ -204,7 +204,14 @@ class MainActivity : ComponentActivity() {
                 }
                 if(user) {
                     val running=m.busy&&m.activeSendID?.let{message.id=="local:$it:user"}==true
-                    if(running||!message.process.isNullOrEmpty())ChatRunView(message.process.orEmpty(),m.activity,running)
+                    if (running) {
+                        val hasReply = messages.asReversed().any { it.replyTo == message.id }
+                        if (m.showThinking) {
+                            ActiveChatRunView(m, hasReply)
+                        } else if (!hasReply) WaitingReplyBubble()
+                    } else if (m.showThinking && !message.process.isNullOrEmpty()) {
+                        ChatRunView(message.process, "", false)
+                    }
                 }
                 }
             }
@@ -254,7 +261,19 @@ class MainActivity : ComponentActivity() {
                         voiceScene=m.selected;voiceEndpoint=m.connection?.endpoint
                         try{voice.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply{putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);putExtra(RecognizerIntent.EXTRA_LANGUAGE,java.util.Locale.getDefault().toLanguageTag())})}catch(_:android.content.ActivityNotFoundException){m.notice="系统语音识别暂不可用。"}
                     },enabled=!m.busy,modifier=Modifier.size(44.dp)){Icon(Icons.Outlined.Mic,"语音输入",tint=MaterialTheme.colorScheme.onSurfaceVariant)}
-                    if(m.busy || m.connection==null || m.draft.isNotBlank() || m.attachments.isNotEmpty())FilledIconButton(onClick = { focus.clearFocus(); if (m.connection == null) connect() else if (m.busy && m.draft.isBlank() && m.attachments.isEmpty()) m.stop() else m.send() }, enabled = m.connection == null || m.busy || m.draft.isNotBlank() || m.attachments.isNotEmpty(), modifier = Modifier.size(44.dp)) { Icon(if (m.busy && m.draft.isBlank() && m.attachments.isEmpty()) Icons.Outlined.Stop else if (m.connection == null) Icons.Outlined.Link else Icons.Outlined.ArrowUpward, if (m.busy) "停止生成" else if (m.connection == null) "连接 Being" else "发送") }
+                    val hasDraft = m.draft.isNotBlank() || m.attachments.isNotEmpty()
+                    val canInterrupt = m.canInterrupt(m.selected)
+                    if (hasDraft && canInterrupt) TextButton(onClick={focus.clearFocus();m.send()}) { Text("排队") }
+                    if (m.busy || m.connection == null || hasDraft) {
+                        val stop = m.busy && !hasDraft
+                        FilledIconButton(onClick = {
+                            focus.clearFocus()
+                            when { m.connection == null -> connect(); stop -> m.stop(); else -> m.send(interrupt=true) }
+                        },modifier=Modifier.size(44.dp)) {
+                            Icon(if(stop) Icons.Outlined.Stop else if(m.connection==null) Icons.Outlined.Link else Icons.Outlined.ArrowUpward,
+                                when { m.connection==null -> "连接 Being"; stop -> "停止生成"; canInterrupt -> "立即发送"; m.busy -> "加入队列"; else -> "发送" })
+                        }
+                    }
                 }
             }
         }

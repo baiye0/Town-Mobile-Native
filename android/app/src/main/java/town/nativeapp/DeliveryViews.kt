@@ -90,11 +90,11 @@ import kotlinx.coroutines.launch
                 entry.error?.let{Text(it,color=MaterialTheme.colorScheme.error)}
                 var expanded by remember(entry.id){mutableStateOf(false)}
                 if(entry.process.isNotEmpty()){TextButton(onClick={expanded=!expanded}){Text("思考与工具过程")};if(expanded)Text(entry.process)}
-                if(entry.phase=="queued"&&m.busy)TextButton(onClick={m.interruptQueued(entry.id)}){Text("停止当前回复并优先发送")}
+                if(entry.phase=="queued"&&m.canInterrupt(entry.sceneID))TextButton(onClick={m.interruptQueued(entry.id)}){Text("停止当前回复并优先发送")}
                 Row{
                     if(DeliveryRules.canEdit(entry.phase)){if(entry.files.isEmpty())TextButton(onClick={edit=entry.id;text=entry.text}){Text("编辑")};TextButton(onClick={m.changeQueued(entry.id,move=-1)}){Text("上移")};TextButton(onClick={m.changeQueued(entry.id,move=1)}){Text("下移")};if(entry.phase=="failed")TextButton(onClick={m.retryQueued(entry.id)}){Text("重试")}}
                     if(entry.phase in listOf("queued","failed","unknown","stopped"))TextButton(onClick={m.changeQueued(entry.id,remove=true)}){Text("移除")}
-                    if(entry.phase=="unknown")TextButton(onClick={m.resumeDelivery()}){Text("核对结果")}
+                    if(entry.phase=="unknown")TextButton(onClick={m.checkQueuedResult(entry.id)},enabled=!m.busy){Text("核对结果")}
                 };HorizontalDivider()
             }
         }

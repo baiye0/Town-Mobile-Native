@@ -57,6 +57,7 @@ struct LiveChatMessageRow: View {
 
 struct ChatMessageRow: View {
     let message: Message
+    @AppStorage("chat.showThinking") private var showThinking = false
     @EnvironmentObject private var store: Store
     var body: some View {
         Group {
@@ -129,8 +130,15 @@ struct ChatMessageRow: View {
                         $0.id == store.activeSendID && $0.userID == message.id && $0.endpoint == store.connection?.endpoint
                     }
                     if running {
-                        ActiveChatRunView(progress: store.runProgress)
-                    } else if message.process?.isEmpty == false {
+                        // Use visible replies, including those restored from history.
+                        // Whitespace-only frames must not dismiss the waiting bubble.
+                        let hasReply = store.displayMessages.reversed().contains { $0.replyTo == message.id }
+                        if showThinking {
+                            ActiveChatRunView(progress: store.runProgress, hasReply: hasReply)
+                        } else if !hasReply {
+                            WaitingReplyBubble().padding(.top, 10)
+                        }
+                    } else if showThinking && message.process?.isEmpty == false {
                         ChatRunView(process: message.process ?? "", activity: "", isActive: false)
                     }
                 }

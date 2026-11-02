@@ -106,16 +106,18 @@ private func pending() -> PendingSend {
 }
 
 @Test func deliveryIndicatorsAndQueueSelectionKeepUnconfirmedSendsIndependent() {
-    for phase in ["queued", "preparing", "sending", "waiting"] {
-        #expect(!DeliveryRules.showsRetry(phase))
-        #expect(!DeliveryRules.skipsQueueHead(phase, recovering: false))
+    func entry(_ phase: String) -> PendingSend {
+        PendingSend(endpoint: "fixture", sceneID: "room", title: "room", text: phase, phase: phase)
     }
-    for phase in ["failed", "unknown"] {
-        #expect(DeliveryRules.showsRetry(phase))
-        #expect(DeliveryRules.skipsQueueHead(phase, recovering: false))
-    }
-    #expect(!DeliveryRules.skipsQueueHead("unknown", recovering: true))
-    #expect(DeliveryRules.skipsQueueHead("stopped", recovering: true))
+    let queued = entry("queued"), waiting = entry("waiting"), sending = entry("sending"), unknown = entry("unknown")
+    let items = [entry("failed"), entry("stopped"), unknown, queued, waiting, sending]
+    #expect(DeliveryRules.nextDelivery(items, recoverUnknown: true)?.id == waiting.id)
+    #expect(DeliveryRules.nextDelivery(Array(items.dropLast(2)) + [sending], recoverUnknown: false)?.id == sending.id)
+    #expect(DeliveryRules.nextDelivery(Array(items.dropLast(2)), recoverUnknown: false)?.id == queued.id)
+    #expect(DeliveryRules.nextDelivery([unknown], recoverUnknown: false) == nil)
+    #expect(DeliveryRules.nextDelivery([unknown], recoverUnknown: true)?.id == unknown.id)
+    #expect(DeliveryRules.showsRetry("unknown"))
+    #expect(DeliveryRules.showsRetry("failed"))
     #expect(!DeliveryRules.showsRetry("stopped"))
 }
 

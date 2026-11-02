@@ -57,16 +57,26 @@ enum Vault {
             storedConversations = newValue
             displayRevision += 1
             // Structural/history changes still invalidate the list. Live text
-            // uses projectConversation's row-only path instead.
-            var retainedMessages = Set<UUID>()
-            for room in newValue {
-                for message in room.messages {
+            // uses projectTextFrame's indexed path instead.
+            rowOffsets.removeAll(keepingCapacity: true)
+            duplicateSequences = newValue.map { _ in Set<Int>() }
+            for (r, room) in newValue.enumerated() {
+                var seen = Set<Int>()
+                for (i, message) in room.messages.enumerated() {
+                    if let seq = message.sequence, !seen.insert(seq).inserted { duplicateSequences[r].insert(seq) }
                     liveReplies[message.id]?.update(message)
-                    retainedMessages.insert(message.id)
+                    rowOffsets[message.id] = (r, i)
                 }
             }
-            liveReplies = liveReplies.filter { retainedMessages.contains($0.key) }
+            liveReplies = liveReplies.filter { rowOffsets[$0.key] != nil }
         }
+    }
+    private var duplicateSequences: [Set<Int>] = []
+    private var rowOffsets: [UUID: (room: Int, row: Int)] = [:]
+    private var displayOffsets: [UUID: Int] = [:]
+    func storedRow(_ id: UUID, in room: Int) -> Message? {
+        guard let position = rowOffsets[id], position.room == room else { return nil }
+        return storedConversations[room].messages[position.row]
     }
     private var liveReplies: [UUID: LiveReplyState] = [:]
     func liveReply(for message: Message) -> LiveReplyState {
@@ -94,43 +104,52 @@ enum Vault {
         let revision = displayRevision
         if cachedRevision != revision {
             cachedDisplay = buildDisplayMessages().filter { !isMessageDeleted($0, endpoint: connection?.endpoint ?? "") && DeliveryRules.hasVisibleContent($0.text, hasAttachments: $0.files?.isEmpty == false) }
-            let visibleIDs = Set(cachedDisplay.map(\.id))
-            liveReplies = liveReplies.filter { visibleIDs.contains($0.key) }
+            displayOffsets.removeAll(keepingCapacity: true)
+            for (i, message) in cachedDisplay.enumerated() { displayOffsets[message.id] = i }
+            liveReplies = liveReplies.filter { displayOffsets[$0.key] != nil }
             cachedRevision = revision
         }
         return cachedDisplay
     }
     // Token-only edits do not change row identity or ordering. Patch the visible
     // snapshot instead of re-merging and sorting every historical row per frame.
-    func projectConversation(_ room: Conversation, at index: Int) {
-        let old = storedConversations[index].messages
-        // Only an existing open reply's text can bypass the global publisher.
-        // Insertions, finalization and history metadata take the normal path.
-        var updates: [UUID: Message] = [:]
-        if old.count == room.messages.count {
-            for (before, after) in zip(old, room.messages) where before != after {
-                var textOnly = before; textOnly.text = after.text
-                guard before.streaming == true, after.streaming == true,
-                      textOnly == after,
-                      DeliveryRules.hasVisibleContent(before.text, hasAttachments: before.files?.isEmpty == false) ==
-                        DeliveryRules.hasVisibleContent(after.text, hasAttachments: after.files?.isEmpty == false) else {
-                    // Whitespace-only replies have no row to update. Publish
-                    // the list when the first visible text arrives.
-                    conversations[index] = room; return
-                }
-                updates[after.id] = after
+    func projectTextFrame(_ rows: [Message], in room: Int) -> Bool {
+        var updates: [(Int, Message)] = []
+        for row in rows {
+            guard let pos = rowOffsets[row.id], pos.room == room else { return false }
+            let old = storedConversations[room].messages[pos.row]
+            if row.role == "user", old.sequence != nil, row.sequence == nil {
+                // History owns the acknowledged prompt; only its process can change.
+                guard row.process == old.process else { return false }
+                continue
             }
-        } else { conversations[index] = room; return }
-        let cacheWasCurrent = cachedRevision == displayRevision
-        storedConversations[index] = room
-        displayRevision += 1
-        if cacheWasCurrent {
-            for i in cachedDisplay.indices {
-                if let update = updates[cachedDisplay[i].id] { cachedDisplay[i].text = update.text }
-            }
-            cachedRevision = displayRevision
+            if let seq = row.sequence, duplicateSequences[room].contains(seq) { return false }
+            var projected = row
+            projected.sequence = row.sequence ?? old.sequence
+            projected.persistedText = old.persistedText
+            if row.sequence == nil && old.text != row.text { projected.persistedText = nil }
+            if old == projected { continue }
+            guard row.role == "being", old.streaming == true, row.streaming == true, !row.text.isEmpty else { return false }
+            var updated = old
+            updated.text = row.text
+            // A history echo may have acknowledged an open reply. Keep its sequence;
+            // changes to persistence metadata or visibility still go through reconciliation.
+            guard updated == projected,
+                  DeliveryRules.hasVisibleContent(old.text, hasAttachments: false) ==
+                  DeliveryRules.hasVisibleContent(row.text, hasAttachments: false) else { return false }
+            updates.append((pos.row, updated))
         }
-        for message in updates.values { liveReplies[message.id]?.update(message) }
+        guard !updates.isEmpty else { return true }
+        let currentCache = cachedRevision == displayRevision
+        for (index, message) in updates {
+            storedConversations[room].messages[index] = message
+            if currentCache, let visible = displayOffsets[message.id] { cachedDisplay[visible].text = message.text }
+            liveReplies[message.id]?.update(message)
+        }
+        storedConversations[room].updated = Date()
+        displayRevision += 1
+        if currentCache { cachedRevision = displayRevision }
+        return true
     }
     private func buildDisplayMessages() -> [Message] {
         if showAllScenes { return HistoryRules.merge(conversations.filter { $0.endpoint == connection?.endpoint }.flatMap { room in room.messages.map { message in var m = message; if m.sceneID == nil { m.sceneID = room.id }; return m } }, timeline, activeIDs: activeMessageIDs) }
@@ -266,10 +285,17 @@ enum Vault {
         if let endpoint = connection?.endpoint { hydrateHistory(endpoint) }
         for entry in visibleOutbox { project(entry) }
     }
-    @discardableResult func persist() -> Bool {
+    func persist() {
+        guard !conversationStorageUnavailable else { return }
+        SnapshotFileWriter.enqueue(conversations, to: file) { [weak self] ok in
+            if !ok { Task { @MainActor in self?.notice = "对话未能保存到设备，请检查存储空间。" } }
+        }
+    }
+    func persistConfirmed() async -> Bool {
         guard !conversationStorageUnavailable else { return false }
-        do { try JSONEncoder().encode(conversations).write(to: file, options: [.atomic, .completeFileProtection]); return true }
-        catch { notice = "对话未能保存到设备，请检查存储空间。"; return false }
+        return await withCheckedContinuation { continuation in
+            SnapshotFileWriter.enqueue(conversations, to: file) { continuation.resume(returning: $0) }
+        }
     }
     func newChat() { do { try createScene("新场景") } catch { notice = error.localizedDescription } }
     func request(_ c: Connection, _ path: String, method: String = "GET", body: [String: Any]? = nil) -> URLRequest {
@@ -361,9 +387,9 @@ enum Vault {
                 cursor = fresh.compactMap( { $0["seq"] as? Int } ).max() ?? cursor
                 cachedHistory[c.endpoint] = cached; timeline = cached
                 hydrateHistory(c.endpoint)
-                do {
-                    try JSONEncoder().encode(cachedHistory).write(to:historyFile,options:[.atomic,.completeFileProtection])
-                } catch { notice = "历史记录已加载，但缓存保存失败，请检查设备存储空间或解锁后重试。" }
+                SnapshotFileWriter.enqueue(cachedHistory, to: historyFile) { [weak self] ok in
+                    if !ok { Task { @MainActor in self?.notice = "历史记录已加载，但缓存保存失败，请检查设备存储空间或解锁后重试。" } }
+                }
                 persist()
                 if initial { break }
             }

@@ -1,16 +1,34 @@
 import Combine
 import XCTest
+import SwiftUI
 @testable import Town
 
 @MainActor final class CompatibilityStateTests: XCTestCase {
-    func testUnreadableConversationIsNotReplacedByEmptyHistory() throws {
+    func testConfirmedSaveIncludesLatestSnapshotAfterQueuedSaves() async throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let store = Store(conversationFile: file)
+        let room = Conversation(id: "fixture", endpoint: "fixture")
+        store.conversations = [room]
+        store.persist()
+        store.conversations[0].messages.append(Message(role: "user", text: "new turn"))
+        store.persist()
+        store.conversations[0].messages.append(Message(role: "being", text: "final reply"))
+        let confirmed = await store.persistConfirmed()
+        XCTAssertTrue(confirmed)
+        let saved = try JSONDecoder().decode([Conversation].self, from: Data(contentsOf: file))
+        XCTAssertEqual(saved.first?.messages.map(\.text), ["new turn", "final reply"])
+    }
+
+    func testUnreadableConversationIsNotReplacedByEmptyHistory() async throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
         let original = Data("[{\"id\":\"recoverable-fragment\"".utf8)
         try original.write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
         let store = Store(conversationFile: file)
         XCTAssertTrue(store.conversationStorageUnavailable)
-        XCTAssertFalse(store.persist())
+        let saved = await store.persistConfirmed()
+        XCTAssertFalse(saved)
         store.draft = "unsent draft"
         store.send()
         XCTAssertEqual(store.draft, "unsent draft")
@@ -466,7 +484,8 @@ import XCTest
 
     func testHistoryBackForwardAndNewBranch() {
         let history = PageHistory()
-        let first = UUID(), second = UUID(), replacement = UUID()
+        let route = { PageRoute(id: UUID()) { AnyView(EmptyView()) } }
+        let first = route(), second = route(), replacement = route()
         history.navigate([first, second])
         history.back()
         XCTAssertEqual(history.path, [first])

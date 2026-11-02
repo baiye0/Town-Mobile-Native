@@ -26,7 +26,7 @@ struct MoreView: View {
                 }
                 SettingsSectionLabel(title: "设置")
                 SettingsCard {
-                    HistoryLink { ConversationSettingsView() } label: { SettingsRow(title: "对话设置", icon: "bubble.left.and.bubble.right", subtitle: "SBS · 阅读字号") }
+                    HistoryLink { ConversationSettingsView() } label: { SettingsRow(title: "对话设置", icon: "bubble.left.and.bubble.right", subtitle: "SBS · 思考过程 · 阅读字号") }
                     SettingsDivider()
                     HistoryLink { ModelSettingsView() } label: { SettingsRow(title: "模型设置", icon: "cpu", subtitle: "线路、模型与思考深度") }
                     SettingsDivider()
@@ -109,12 +109,17 @@ struct AppearanceSettingsView: View {
 
 struct ConversationSettingsView: View {
     @EnvironmentObject private var store: Store
+    @AppStorage("chat.showThinking") private var showThinking = false
     @AppStorage("reading.size") private var readingSize = 16.0
     var body: some View {
         SettingsPage {
             SettingsSection(title: "SBS", icon: "sparkles") {
                 if store.connection != nil { SBSControlView() }
                 else { SettingsNote(text: "连接 Being 后可配置 SBS") }
+            }
+            SettingsSection(title: "回复显示", icon: "bubble.left") {
+                Toggle("显示思考过程", isOn: $showThinking)
+                SettingsNote(text: "开启后，可在对话中展开思考和工具记录。")
             }
             SettingsSection(title: "阅读", icon: "textformat.size") {
                 Stepper("阅读字号 · \(Int(readingSize))", value: $readingSize, in: 12...24)
